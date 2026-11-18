@@ -9,17 +9,15 @@ import SpikeLog
 /// overlay sits above both. Logs focus, idle time and the first presented frame.
 @MainActor final class OverlayProbe {
     private let options: Options
-    private let device = MTLCreateSystemDefaultDevice()!
+    private let metal = SpikeMetal()
     private let pipeline: any MTLRenderPipelineState
-    private let queue: any MTLCommandQueue
     private var windows: [NSWindow] = []
     private var geometry = OverlayProbe.screenGeometry()
     private var shown = false
 
     init(options: Options) {
         self.options = options
-        queue = device.makeCommandQueue()!
-        pipeline = Self.makePipeline(device: device)
+        pipeline = metal.pipeline(fragment: "markerFragment", format: .rgba16Float)
         // This notification also fires on every EDR headroom step (once per frame while the
         // headroom ramps), so rebuild only when the screens' frames or scales change.
         NotificationCenter.default.addObserver(
@@ -45,7 +43,7 @@ import SpikeLog
             forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main
         ) { _ in SpikeLog.emit("harness-became-active") }
         SpikeLog.emit("overlay-config", [
-            "level": options.level, "levelValue": Self.level(options.level).rawValue,
+            "level": options.level, "levelValue": OverlayLevels.level(options.level).rawValue,
             "behaviors": options.behaviors, "screens": Self.describeScreens(),
         ])
         Timer.scheduledTimer(withTimeInterval: options.showAfter, repeats: false) { [weak self] _ in
@@ -84,54 +82,26 @@ import SpikeLog
     }
 
     private func makeWindow(for screen: NSScreen) -> NSWindow {
-        let window = OverlayWindow(contentRect: screen.frame, styleMask: .borderless, backing: .buffered, defer: false)
-        window.setFrame(screen.frame, display: false)
-        window.isOpaque = false
-        window.backgroundColor = .clear
-        window.hasShadow = false
-        window.ignoresMouseEvents = true
-        window.isReleasedWhenClosed = false
-        window.level = Self.level(options.level)
-        window.collectionBehavior = Self.behavior(options.behaviors)
+        let window = OverlayWindow.make(frame: screen.frame, options: options)
         let view = MetalView(frame: NSRect(origin: .zero, size: screen.frame.size))
-        view.metalLayer.device = device
-        view.metalLayer.pixelFormat = .rgba16Float
-        view.metalLayer.colorspace = CGColorSpace(name: CGColorSpace.extendedLinearDisplayP3)
-        view.metalLayer.wantsExtendedDynamicRangeContent = true
-        view.metalLayer.isOpaque = false
-        view.metalLayer.contentsScale = screen.backingScaleFactor
-        view.metalLayer.drawableSize = CGSize(
-            width: screen.frame.width * screen.backingScaleFactor, height: screen.frame.height * screen.backingScaleFactor
-        )
+        metal.configure(view.metalLayer, format: .rgba16Float, edr: options.edr,
+                        pointSize: screen.frame.size, scale: screen.backingScaleFactor)
         window.contentView = view
         return window
     }
 
     private func render(_ window: NSWindow, orderedAt: CFTimeInterval, attempt: Int) {
-        guard let layer = (window.contentView as? MetalView)?.metalLayer, let drawable = layer.nextDrawable(),
-              let screen = window.screen else { return }
+        guard let layer = (window.contentView as? MetalView)?.metalLayer, let screen = window.screen else { return }
         let scale = Float(screen.backingScaleFactor)
         let width = Float(screen.frame.width) * scale, height = Float(screen.frame.height) * scale
         let side = 160 * scale
         // Top marker spans the menu bar; bottom marker spans the Dock area.
-        var marker = MarkerUniforms(
+        let marker = MarkerUniforms(
             rects: (SIMD4(width * 0.3, 0, side, side), SIMD4(width * 0.5 - side / 2, height - side, side, side)),
             color: SIMD4(0.25, 0.6, 1.0, 1.0) * Float(options.alpha)
         )
-        let pass = MTLRenderPassDescriptor()
-        pass.colorAttachments[0].texture = drawable.texture
-        pass.colorAttachments[0].loadAction = .clear
-        pass.colorAttachments[0].clearColor = MTLClearColor(red: 0, green: 0, blue: 0, alpha: 0)
-        pass.colorAttachments[0].storeAction = .store
-        guard let commands = queue.makeCommandBuffer(),
-              let encoder = commands.makeRenderCommandEncoder(descriptor: pass) else { return }
-        encoder.setRenderPipelineState(pipeline)
-        encoder.setFragmentBytes(&marker, length: MemoryLayout<MarkerUniforms>.stride, index: 0)
-        encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
-        encoder.endEncoding()
         let number = window.windowNumber
-        drawable.addPresentedHandler { [weak self] presented in
-            let presentedTime = presented.presentedTime
+        metal.draw(layer, pipeline: pipeline, uniforms: marker) { [weak self] presentedTime in
             Task { @MainActor in
                 SpikeLog.emit("overlay-presented", [
                     "windowNumber": number, "attempt": attempt, "presentedTime": presentedTime,
@@ -144,40 +114,6 @@ import SpikeLog
                 }
             }
         }
-        commands.present(drawable)
-        commands.commit()
-    }
-
-    private static func makePipeline(device: any MTLDevice) -> any MTLRenderPipelineState {
-        let library = try! device.makeDefaultLibrary(bundle: Bundle.module)
-        let descriptor = MTLRenderPipelineDescriptor()
-        descriptor.vertexFunction = library.makeFunction(name: "fullScreenVertex")
-        descriptor.fragmentFunction = library.makeFunction(name: "markerFragment")
-        descriptor.colorAttachments[0].pixelFormat = .rgba16Float
-        return try! device.makeRenderPipelineState(descriptor: descriptor)
-    }
-
-    static func level(_ name: String) -> NSWindow.Level {
-        switch name {
-        case "normal": .normal
-        case "floating": .floating
-        case "statusBar": .statusBar
-        case "popUpMenu": .popUpMenu
-        case "screenSaver": .screenSaver
-        case "assistiveTechHigh": NSWindow.Level(Int(CGWindowLevelForKey(.assistiveTechHighWindow)))
-        default: .statusBar
-        }
-    }
-
-    static func behavior(_ names: [String]) -> NSWindow.CollectionBehavior {
-        let table: [String: NSWindow.CollectionBehavior] = [
-            "canJoinAllSpaces": .canJoinAllSpaces, "moveToActiveSpace": .moveToActiveSpace,
-            "stationary": .stationary, "ignoresCycle": .ignoresCycle,
-            "fullScreenAuxiliary": .fullScreenAuxiliary, "fullScreenNone": .fullScreenNone,
-            "canJoinAllApplications": .canJoinAllApplications, "auxiliary": .auxiliary,
-            "transient": .transient,
-        ]
-        return names.reduce(into: []) { $0.formUnion(table[$1] ?? []) }
     }
 
     static func describeScreens() -> [[String: any Sendable]] {
@@ -201,25 +137,8 @@ import SpikeLog
     }
 }
 
-private struct MarkerUniforms {
+/// Matches `struct Marker` in Overlay.metal. Also used by the EDR patch (S2).
+struct MarkerUniforms {
     var rects: (SIMD4<Float>, SIMD4<Float>)
     var color: SIMD4<Float>
-}
-
-private final class OverlayWindow: NSWindow {
-    override var canBecomeKey: Bool { false }
-    override var canBecomeMain: Bool { false }
-}
-
-private final class MetalView: NSView {
-    let metalLayer = CAMetalLayer()
-
-    override init(frame: NSRect) {
-        super.init(frame: frame)
-        wantsLayer = true
-    }
-
-    required init?(coder: NSCoder) { fatalError("unused") }
-
-    override func makeBackingLayer() -> CALayer { metalLayer }
 }

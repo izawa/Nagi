@@ -2,7 +2,7 @@
 //
 // One probe per launch, results as JSON Lines on stdout:
 //   open -n -g -W --stdout <file> build/spikes/NagiSpike-plain.app --args --run <probe> [options]
-// Probes: header, s9, s5, overlay. Every run exits by itself after --duration seconds
+// Probes: header, s9, s3, s5, overlay, ramp, edr (S2), glass (S8). Every run exits by itself after --duration seconds
 // (default 20, max 600); the status item's menu can also quit it.
 //
 // Rule for the .plain variants: never call CGRequestScreenCaptureAccess, SCShareableContent
@@ -17,11 +17,15 @@ import SpikeLog
 struct Options {
     var run = "header"
     var duration = 20.0
+    var step = 6.0             // s3: seconds per input step
     var hz = 15.0              // s5 sampling rate
     var showAfter = 3.0        // overlay: delay before ordering the windows in
     var level = "statusBar"    // overlay: see OverlayLevel
     var behaviors = ["canJoinAllSpaces", "fullScreenAuxiliary", "stationary", "ignoresCycle"]
     var alpha = 0.35           // overlay: marker opacity (keep it faint on the author's display)
+    var edr = true             // overlay, ramp: request EDR on the rgba16Float layers
+    var maxAlpha = 0.08        // ramp: darkening at the right edge
+    var gain = 2.0             // edr: patch color relative to SDR white
 
     init(_ arguments: [String]) {
         var values: [String: String] = [:]
@@ -32,11 +36,15 @@ struct Options {
         }
         run = values["run"] ?? run
         duration = min(Double(values["duration"] ?? "") ?? duration, 600)
+        if let seconds = Double(values["step"] ?? ""), seconds.isFinite, seconds > 0 { step = seconds }
         if let rate = Double(values["hz"] ?? ""), rate.isFinite, rate > 0 { hz = rate }
         showAfter = Double(values["show-after"] ?? "") ?? showAfter
         level = values["level"] ?? level
         behaviors = values["behaviors"].map { $0.split(separator: ",").map(String.init) } ?? behaviors
         alpha = Double(values["alpha"] ?? "") ?? alpha
+        edr = values["edr"].map { $0 != "0" } ?? edr
+        maxAlpha = Double(values["max-alpha"] ?? "") ?? maxAlpha
+        gain = Double(values["gain"] ?? "") ?? gain
     }
 }
 
@@ -57,6 +65,8 @@ struct Options {
         case "s9":
             runS9()
             Self.quit(reason: "done")
+        case "s3":
+            probe = IdleStateProbe(statusItem: statusItem, step: options.step)
         case "s5":
             // S5 is about what is returned WITHOUT the permission; a granted run proves nothing.
             guard !CGPreflightScreenCaptureAccess() else {
@@ -67,6 +77,10 @@ struct Options {
             probe = WindowListProbe(hz: options.hz)
         case "overlay":
             probe = OverlayProbe(options: options)
+        case "ramp", "edr":
+            probe = RampProbe(options: options)
+        case "glass":
+            probe = GlassProbe(options: options)
         default:
             SpikeLog.emit("error", ["message": "unknown --run \(options.run)"])
             Self.quit(reason: "error")

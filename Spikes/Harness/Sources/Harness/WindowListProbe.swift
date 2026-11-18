@@ -6,7 +6,6 @@ import SpikeLog
 /// Logs key names (never the values of name keys), the Fixture's windows when they change,
 /// and the call time. Correlate with the Fixture's own log by `t`.
 @MainActor final class WindowListProbe {
-    private let fixtureBundleID = "org.izawa.nagi.spike.fixture"
     private var timer: Timer?
     private var durations: [Double] = []
     private var lastFixtureWindows: [[String: Double]]?  // nil until the Fixture is first seen
@@ -37,7 +36,7 @@ import SpikeLog
             ])
         }
 
-        guard let pid = NSRunningApplication.runningApplications(withBundleIdentifier: fixtureBundleID)
+        guard let pid = NSRunningApplication.runningApplications(withBundleIdentifier: FixtureWindows.bundleID)
             .first?.processIdentifier else { return }
         // Front-to-back order of the whole on-screen list is the array order.
         let windows: [[String: Double]] = list.enumerated().compactMap { index, entry in
