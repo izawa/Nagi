@@ -1,0 +1,21 @@
+{
+  "sourceLanguage" : "ja",
+  "strings" : {
+    "凪" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Nagi" } }
+      }
+    },
+    "今すぐ見る" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "See It Now" } }
+      }
+    },
+    "凪を終了" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Quit Nagi" } }
+      }
+    }
+  },
+  "version" : "1.0"
+}

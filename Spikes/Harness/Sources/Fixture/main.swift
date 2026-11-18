@@ -7,6 +7,9 @@ private enum Scene: String {
     case panels
     case s5
     case flash
+    /// M1 stage 2: a frontmost window that logs every input it receives, for measuring
+    /// input → nagi withdrawal and onset (M1-PLAN 7.2). Local monitor only: no permission.
+    case input
 }
 
 @MainActor
@@ -68,6 +71,7 @@ private final class Fixture: NSObject, NSApplicationDelegate {
     private var primaryFrame = CGRect.zero
     private var initialFrames: [CGRect] = []
     private var stepIndex = 0
+    private var inputMonitor: Any?
 
     init(scene: Scene, duration: TimeInterval, grays: [CGFloat]) {
         self.scene = scene
@@ -107,6 +111,19 @@ private final class Fixture: NSObject, NSApplicationDelegate {
                 }
             }
             RunLoop.main.add(timer, forMode: .common)
+        case .input:
+            let frame = CGRect(x: visible.midX - 300, y: visible.midY - 200, width: 600, height: 400)
+            addWindow("Input", gray: 0.95, frame: frame).window?.acceptsMouseMovedEvents = true
+            windows.last?.window.makeKeyAndOrderFront(nil)
+            NSApp.activate()
+            inputMonitor = NSEvent.addLocalMonitorForEvents(
+                matching: [.keyDown, .keyUp, .flagsChanged, .leftMouseDown, .leftMouseUp, .rightMouseDown,
+                           .rightMouseUp, .mouseMoved, .leftMouseDragged, .scrollWheel]) { event in
+                // NSEvent.timestamp and systemUptime are both seconds since boot; log both to check.
+                SpikeLog.emit("input", ["kind": Int(event.type.rawValue), "eventTimestamp": event.timestamp,
+                                        "now": ProcessInfo.processInfo.systemUptime])
+                return event
+            }
         }
 
         logWindows(scene == .flash ? "flash-ready" : "ready", ["duration": duration])

@@ -32,6 +32,7 @@ struct Options {
     var filter = "self"        // capture: "self" excludes this app's windows, "none" captures everything
     var trials = 0             // capture: number of start/stop trials; 0 runs one stream until --duration
     var captureScale = 1.0     // capture: output size relative to the display's pixels (load comparison)
+    var watch: CGPoint?        // capture: an extra point to sample, "x,y" in Cocoa points (M1 stage 2)
 
     init(_ arguments: [String]) {
         var values: [String: String] = [:]
@@ -55,6 +56,12 @@ struct Options {
         if let value = values["filter"], ["self", "none"].contains(value) { filter = value }
         trials = max(Int(values["trials"] ?? "") ?? trials, 0)
         if let scale = Double(values["capture-scale"] ?? ""), scale.isFinite { captureScale = min(max(scale, 0.1), 1) }
+        if let text = values["watch"] {
+            let parts = text.split(separator: ",", omittingEmptySubsequences: false).map { Double($0) }
+            if parts.count == 2, let x = parts[0], let y = parts[1], x.isFinite, y.isFinite, x >= 0, y >= 0 {
+                watch = CGPoint(x: x, y: y)
+            }
+        }
     }
 }
 

@@ -1,0 +1,263 @@
+// The pure state machine of nagi (SPEC 2.1, 2.2; M1-PLAN 4.3-4.5). No clocks or OS calls: the
+// engine feeds it timestamps and readings, so tests can drive it.
+
+public struct NagiTiming: Sendable {
+    public let onset: Double
+    public let idleOffset: Double
+    public let entryDuration: Double
+    public let fadeOut: Double
+    public let leaveBudget: Double
+    public let depthDecayPerActiveSecond: Double
+    public let mediaGrace: Double
+    public let previewDuration: Double
+
+    public init(
+        onset: Double = 3.0,
+        idleOffset: Double = 0,
+        entryDuration: Double = 4.0,
+        fadeOut: Double = 0.4,
+        leaveBudget: Double = 0.8,
+        depthDecayPerActiveSecond: Double = 20,
+        mediaGrace: Double = 3.0,
+        previewDuration: Double = 30
+    ) {
+        precondition((1...60).contains(onset), "Onset must be between 1 and 60 seconds")
+        precondition(fadeOut < leaveBudget, "Fade-out must be shorter than the leave budget")
+        precondition(
+            [idleOffset, entryDuration, fadeOut, leaveBudget, depthDecayPerActiveSecond,
+             mediaGrace, previewDuration].allSatisfy { $0.isFinite && $0 >= 0 },
+            "Timing values must be finite and nonnegative"
+        )
+        self.onset = onset
+        self.idleOffset = idleOffset
+        self.entryDuration = entryDuration
+        self.fadeOut = fadeOut
+        self.leaveBudget = leaveBudget
+        self.depthDecayPerActiveSecond = depthDecayPerActiveSecond
+        self.mediaGrace = mediaGrace
+        self.previewDuration = previewDuration
+    }
+}
+
+public struct NagiInputs: Sendable {
+    public let now: Double
+    public let idleReading: Double
+    public let paused: Bool
+    public let screenUnavailable: Bool
+    public let mediaActive: Bool
+    public let suppressDuringMedia: Bool
+
+    public init(
+        now: Double,
+        idleReading: Double,
+        paused: Bool = false,
+        screenUnavailable: Bool = false,
+        mediaActive: Bool = false,
+        suppressDuringMedia: Bool = true
+    ) {
+        self.now = now
+        self.idleReading = idleReading
+        self.paused = paused
+        self.screenUnavailable = screenUnavailable
+        self.mediaActive = mediaActive
+        self.suppressDuringMedia = suppressDuringMedia
+    }
+
+    fileprivate var blocksOverlay: Bool { paused || screenUnavailable }
+}
+
+public enum NagiStatePhase: Equatable, Sendable {
+    case active, entering, calm, leaving
+}
+
+public struct NagiOutput: Sendable {
+    public let phase: NagiStatePhase
+    public let presence: Double
+    public let depth: Double
+    public let nextWake: Double?
+    public let leaveDeadline: Double?
+
+    public var showsOverlay: Bool { presence > 0 || phase != .active }
+}
+
+/// Call `step` and `requestPreview` in timestamp order using the same monotonic clock.
+public struct NagiStateMachine: Sendable {
+    private enum State: Sendable {
+        case active
+        case entering(startedAt: Double)
+        case calm
+        case leaving(startedAt: Double, initialPresence: Double)
+
+        var phase: NagiStatePhase {
+            switch self {
+            case .active: .active
+            case .entering: .entering
+            case .calm: .calm
+            case .leaving: .leaving
+            }
+        }
+    }
+
+    private let timing: NagiTiming
+    private var state: State = .active
+    private var depth: Double = 0
+    private var updatedAt: Double?
+    private var previousInputs: NagiInputs?
+    private var lastMediaActiveAt: Double?
+    private var previewEndsAt: Double?
+    /// "See it now" was asked for and waits for the hands to rest (2026-11-18, author).
+    private var previewRequestedAt: Double?
+    private static let previewStillness = 0.5
+    private static let previewPatience = 10.0
+    /// The last input as known when nagi showed (or a preview was asked for); nil while active
+    /// or leaving. Any later input withdraws nagi.
+    private var inputAtEntry: Double?
+
+    public init(timing: NagiTiming = NagiTiming()) {
+        self.timing = timing
+    }
+
+    /// "See it now": nagi shows as soon as the hands have rested for 0.5 s (not T_onset), media
+    /// or not, and stays 30 s unless there is input. The click that asked for it, and the hand
+    /// still moving after it, do not cancel it; it gives up after 10 s of continued input.
+    /// While nagi already shows, the 30 s start again.
+    public mutating func requestPreview(at now: Double) {
+        advance(to: now)
+        guard previousInputs?.blocksOverlay != true, timing.previewDuration > 0 else { return }
+        switch state {
+        case .entering, .calm: previewEndsAt = now + timing.previewDuration
+        case .active, .leaving: previewRequestedAt = now
+        }
+    }
+
+    public mutating func step(_ inputs: NagiInputs) -> NagiOutput {
+        let now = inputs.now
+        // A sample that completes a departure reports the overlay hidden.
+        let wasActive = state.phase == .active
+        advance(to: now)
+
+        let idle = trueIdle(inputs.idleReading)
+        // Input shows as a drop in the reading, or as a last input later than the one known when
+        // nagi showed. The second also catches input that holds the reading at its floor, and a
+        // single key right after "see it now". The reading grows in ~12 ms steps (M1-LOG), so
+        // a 0.1 s tolerance is enough.
+        let dropped = previousInputs.map { previous in
+            inputs.idleReading < previous.idleReading - 0.05 || idle < trueIdle(previous.idleReading)
+        } ?? false
+        let inputSinceShown = inputAtEntry.map { lastInput(inputs) > $0 + Self.inputTolerance } ?? false
+        let inputDetected = dropped || inputSinceShown
+        previousInputs = inputs
+
+        if inputs.mediaActive { lastMediaActiveAt = now }
+        let mediaInGrace = lastMediaActiveAt.map { now < $0 + timing.mediaGrace } ?? false
+        let mediaSuppresses = inputs.suppressDuringMedia && (inputs.mediaActive || mediaInGrace)
+
+        if let requested = previewRequestedAt, now - requested > Self.previewPatience { previewRequestedAt = nil }
+        if inputs.blocksOverlay {
+            state = .active
+            inputAtEntry = nil
+            previewEndsAt = nil
+            previewRequestedAt = nil
+        } else {
+            if inputDetected { previewEndsAt = nil }
+
+            switch state {
+            case .active where wasActive:
+                if previewRequestedAt != nil, idle >= Self.previewStillness {
+                    previewRequestedAt = nil
+                    previewEndsAt = now + timing.previewDuration
+                    enter(at: now)
+                } else if idle >= timing.onset && !mediaSuppresses {
+                    enter(at: now)
+                }
+            case .entering, .calm:
+                if inputDetected || (mediaSuppresses && previewEndsAt == nil) { leave(at: now) }
+            case .active, .leaving:
+                break
+            }
+        }
+
+        let phase = state.phase
+        let waitForOnset = previewRequestedAt != nil
+            ? max(0, Self.previewStillness - idle) : max(0, timing.onset - idle)
+        let nextWake = phase == .active ? now + waitForOnset : nil
+        let leaveDeadline: Double?
+        if case let .leaving(startedAt, _) = state {
+            leaveDeadline = startedAt + timing.leaveBudget
+        } else {
+            leaveDeadline = nil
+        }
+        return NagiOutput(
+            phase: phase, presence: presence(at: now), depth: depth,
+            nextWake: nextWake, leaveDeadline: leaveDeadline
+        )
+    }
+
+    private static let inputTolerance = 0.1
+
+    /// When the last input happened, from a reading (unclamped, so it moves smoothly).
+    private func lastInput(_ inputs: NagiInputs) -> Double {
+        inputs.now - (inputs.idleReading - timing.idleOffset)
+    }
+
+    private func trueIdle(_ reading: Double) -> Double {
+        max(0, reading - timing.idleOffset)
+    }
+
+    private mutating func enter(at now: Double) {
+        state = timing.entryDuration == 0 ? .calm : .entering(startedAt: now)
+        inputAtEntry = previousInputs.map(lastInput) ?? now
+    }
+
+    private mutating func leave(at now: Double) {
+        inputAtEntry = nil
+        let initialPresence = presence(at: now)
+        state = initialPresence > 0 && timing.fadeOut > 0
+            ? .leaving(startedAt: now, initialPresence: initialPresence)
+            : .active
+    }
+
+    private func presence(at now: Double) -> Double {
+        switch state {
+        case .active:
+            return 0
+        case let .entering(startedAt):
+            let progress = min(1, (now - startedAt) / timing.entryDuration)
+            return progress * progress * (3 - 2 * progress)
+        case .calm:
+            return 1
+        case let .leaving(startedAt, initialPresence):
+            let progress = min(1, (now - startedAt) / timing.fadeOut)
+            return initialPresence * (1 - progress)
+        }
+    }
+
+    private mutating func advance(to now: Double) {
+        let previousTime = updatedAt ?? now
+        updatedAt = now
+        var decayFrom = previousTime
+
+        switch state {
+        case .entering, .calm:
+            if let expiry = previewEndsAt, now >= expiry {
+                depth += expiry - previousTime
+                leave(at: expiry)
+                decayFrom = expiry
+            } else {
+                depth += now - previousTime
+                if case let .entering(startedAt) = state, now >= startedAt + timing.entryDuration {
+                    state = .calm
+                }
+                return
+            }
+        case .active, .leaving:
+            break
+        }
+
+        depth = max(0, depth - (now - decayFrom) * timing.depthDecayPerActiveSecond)
+        if case let .leaving(startedAt, _) = state, now >= startedAt + timing.fadeOut {
+            state = .active
+        }
+        if let expiry = previewEndsAt, now >= expiry { previewEndsAt = nil }
+    }
+}

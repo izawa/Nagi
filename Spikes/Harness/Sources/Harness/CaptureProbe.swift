@@ -33,6 +33,13 @@ import Synchronization
             ("own", ownFrame.center), ("readOnly", pair.readOnly.center), ("none", pair.none.center),
         ]
         if let flash = FixtureWindows.frames().first { points.append(("flash", flash.center)) }
+        if let watch = options.watch {
+            if screen.frame.contains(watch) {
+                points.append(("watch", watch))
+            } else {
+                SpikeLog.emit("error", ["message": "--watch \(watch) is outside the main display \(screen.frame)"])
+            }
+        }
         let screen = screen
         let scale = screen.backingScaleFactor * options.captureScale
         sampler = FrameSampler(points: points.map { name, point in (name, Self.pixel(point, on: screen, scale: scale)) })
