@@ -8,6 +8,7 @@ let package = Package(
     products: [.library(name: "KomorebiEffect", targets: ["KomorebiEffect"])],
     dependencies: [.package(path: "../../NagiKit")],
     targets: [
-        .target(name: "KomorebiEffect", dependencies: ["NagiKit"]),
+        .target(name: "KomorebiEffect", dependencies: ["NagiKit"], resources: [.process("Shaders")]),
+        .testTarget(name: "KomorebiEffectTests", dependencies: ["KomorebiEffect"]),
     ]
 )

@@ -11,6 +11,10 @@ import QuartzCore
 /// arrives (M1-PLAN 4.3).
 @MainActor public final class NagiEngine {
     public var strength = 1.0
+    /// Where the sun is computed for; nil uses the time zone's representative city for the frame's date.
+    public var location: GeoLocation?
+    /// A fixed wall-clock date for the sun (stop B looks at daylight in the evening).
+    public var pinnedDate: Date?
     public var suppressDuringMedia = true
     /// Paused until this date; `.distantFuture` pauses until resumed.
     public var pausedUntil: Date? {
@@ -35,14 +39,20 @@ import QuartzCore
     /// machine has gone back to active, so a fade cannot bring it back.
     private var forcedDown = false
     private var framesThisShowing = 0
+    /// GPU milliseconds of recent frames, logged every few seconds with `--trace` (M1-PLAN 7.3).
+    private let gpuTimes = GPUTimes()
     private let withdrawalGuard: WithdrawalGuard
     private let trace: Logger?
     private var screenObserver: (any NSObjectProtocol)?
 
-    public init(effects: [any Effect.Type], timing: NagiTiming = NagiTiming(), trace: Bool = false) throws {
+    private let measurement: MeasurementOptions
+
+    public init(effects: [any Effect.Type], timing: NagiTiming = NagiTiming(), trace: Bool = false,
+                measurement: MeasurementOptions = .init()) throws {
         guard let device = MTLCreateSystemDefaultDevice() else { throw NagiCoreError("no Metal device") }
         renderer = try FrameRenderer(device: device, effects: effects)
-        overlays = OverlayController(device: device)
+        overlays = OverlayController(device: device, measurement: measurement)
+        self.measurement = measurement
         machine = NagiStateMachine(timing: timing)
         let trace = trace ? Logger(subsystem: "org.izawa.Nagi", category: "trace") : nil
         self.trace = trace
@@ -199,9 +209,12 @@ import QuartzCore
         let frame: FrameState
         if display == overlays.driverDisplay || self.frame == nil {
             let now = Self.now
+            let date = pinnedDate ?? Date()
             frame = FrameState(
-                time: now, deltaTime: now - (self.frame?.time ?? now), date: Date(), phase: phase(output.phase),
-                presence: output.presence, depth: output.depth, appearance: Self.appearance, seed: 1)
+                time: now, deltaTime: now - (self.frame?.time ?? now), date: date, phase: phase(output.phase),
+                presence: output.presence, depth: output.depth, appearance: Self.appearance, seed: 1,
+                environment: EnvironmentModel.environment(
+                    at: date, location: location ?? EnvironmentModel.defaultLocation(at: date)))
             renderer.update(frame)
             self.frame = frame
         } else {
@@ -211,6 +224,17 @@ import QuartzCore
             frame = latest
         }
         guard let commandBuffer = renderer.queue.makeCommandBuffer() else { return }
+        if measurement.emptyFrames {
+            let pass = MTLRenderPassDescriptor()
+            pass.colorAttachments[0].texture = update.drawable.texture
+            pass.colorAttachments[0].loadAction = .clear
+            pass.colorAttachments[0].clearColor = MTLClearColor(red: 0, green: 0, blue: 0, alpha: 0)
+            pass.colorAttachments[0].storeAction = .store
+            commandBuffer.makeRenderCommandEncoder(descriptor: pass)?.endEncoding()
+            commandBuffer.present(update.drawable)
+            commandBuffer.commit()
+            return
+        }
         do {
             try renderer.encode(frame, view: view, strength: strength, into: update.drawable.texture,
                                 commandBuffer: commandBuffer)
@@ -219,6 +243,11 @@ import QuartzCore
             return
         }
         commandBuffer.present(update.drawable)
+        if trace != nil {
+            let times = gpuTimes
+            commandBuffer.addCompletedHandler { buffer in times.add((buffer.gpuEndTime - buffer.gpuStartTime) * 1000) }
+            if framesThisShowing % 300 == 0, let summary = gpuTimes.drain() { log("gpu \(summary)") }
+        }
         commandBuffer.commit()
     }
 
@@ -237,5 +266,47 @@ import QuartzCore
     /// Timestamps for measuring onset and withdrawal (M1-PLAN 7.2). `t` is `systemUptime`.
     private func log(_ event: String) {
         trace?.notice("\(event, privacy: .public) t=\(Self.now, format: .fixed(precision: 4), privacy: .public)")
+    }
+}
+
+/// Switches for finding where the cost of a shown overlay goes (M1-LOG). Not for users.
+public struct MeasurementOptions: Sendable {
+    /// Present a cleared drawable instead of running the effects and the final pass.
+    public var emptyFrames = false
+    /// Ask for EDR on the overlay layer.
+    public var edr = true
+    /// The overlay's pixel size relative to the display's.
+    public var drawableScale = 1.0
+    /// Highest frame rate asked of the display link.
+    public var maxFrameRate: Float = 120
+    /// An 8-bit sRGB drawable instead of 16-bit float (empty frames only: the effects draw float).
+    public var eightBit = false
+    public init(emptyFrames: Bool = false, edr: Bool = true, drawableScale: Double = 1, maxFrameRate: Float = 120,
+                eightBit: Bool = false) {
+        self.emptyFrames = emptyFrames
+        self.edr = edr
+        self.drawableScale = drawableScale
+        self.maxFrameRate = maxFrameRate
+        self.eightBit = eightBit
+    }
+}
+
+/// Collects per-frame GPU times from completion handlers (any thread).
+final class GPUTimes: @unchecked Sendable {
+    private let lock = NSLock()
+    private var values: [Double] = []
+
+    func add(_ milliseconds: Double) { lock.withLock { values.append(milliseconds) } }
+
+    /// "n=… mean=… p95=… max=… ms", and starts over; nil if empty.
+    func drain() -> String? {
+        let sorted = lock.withLock { () -> [Double] in
+            defer { values.removeAll() }
+            return values.sorted()
+        }
+        guard let max = sorted.last else { return nil }
+        let mean = sorted.reduce(0, +) / Double(sorted.count)
+        let p95 = sorted[min(sorted.count - 1, Int(Double(sorted.count) * 0.95))]
+        return String(format: "n=%d mean=%.2f p95=%.2f max=%.2f ms", sorted.count, mean, p95, max)
     }
 }

@@ -17,6 +17,11 @@ import SwiftUI
 /// - `--sharing-readonly`: let screenshots and capture see the overlay.
 /// - `--debug-stall`: block the main thread for 1.5 s every 10 s, to test withdrawal while the
 ///   main thread is stuck (M1-PLAN 4.3). Logged as "stall"/"unstall" with `--trace`.
+/// - `--debug-pin-idle`: the idle reading never drops (nagi stays; no withdrawal). Load runs only.
+/// - `--debug-empty-frame`, `--debug-no-edr`, `--debug-drawable-scale s`: see MeasurementOptions.
+/// - `--debug-date ISO8601`: compute the sun for this wall-clock date (stop B in the evening).
+/// - `--effect-param id.key=value` (repeatable): set an effect parameter, e.g. komorebi.lightAlpha=0.06.
+/// - `--debug-ignore-media`: do not hold back for video or meetings (measurements).
 /// - `--debug-preview`: "see it now" one second after launch (checks without waiting for onset).
 /// - `--debug-fake-input s`: the idle reading behaves as if input came every `s` seconds,
 ///   0.5 s after each stall would start (logged as "fakeinput" with the scheduled time).
@@ -44,13 +49,35 @@ import SwiftUI
         if let period = Self.value(after: "--debug-fake-input", in: arguments).flatMap(Double.init) {
             fakeInput(every: period)
         }
+        if arguments.contains("--debug-pin-idle") {
+            // Grows with time like a real reading without input (a constant reads as ongoing input).
+            SystemSignals.idleSource = { 1000 + ProcessInfo.processInfo.systemUptime }
+        }
         var effects = EffectCatalog.all
         let patch = Self.value(after: "--debug-patch", in: arguments).map(Self.patchParameters)
-        if patch != nil { effects.append(PatchEffect.self) }
+        // The patch is for calibration and measurement: alone, so nothing else draws with it.
+        if patch != nil { effects = [PatchEffect.self] }
         do {
-            let engine = try NagiEngine(effects: effects, trace: arguments.contains("--trace"))
+            let measurement = MeasurementOptions(
+                emptyFrames: arguments.contains("--debug-empty-frame"),
+                edr: !arguments.contains("--debug-no-edr"),
+                drawableScale: Self.value(after: "--debug-drawable-scale", in: arguments).flatMap(Double.init)
+                    .flatMap { (0.1...2).contains($0) ? $0 : nil } ?? 1,
+                maxFrameRate: Self.value(after: "--debug-max-fps", in: arguments).flatMap(Float.init) ?? 120,
+                eightBit: arguments.contains("--debug-eight-bit"))
+            let engine = try NagiEngine(effects: effects, trace: arguments.contains("--trace"), measurement: measurement)
             if let patch { engine.renderer.parameters[PatchEffect.descriptor.id] = patch }
             if arguments.contains("--sharing-readonly") { engine.sharingType = .readOnly }
+            if arguments.contains("--debug-ignore-media") { engine.suppressDuringMedia = false }
+            if let date = Self.value(after: "--debug-date", in: arguments).flatMap(ISO8601DateFormatter().date(from:)) {
+                engine.pinnedDate = date
+            }
+            for (index, argument) in arguments.enumerated() where argument == "--effect-param" && index + 1 < arguments.count {
+                let parts = arguments[index + 1].split(separator: "=", maxSplits: 1).map(String.init)
+                let path = parts.first?.split(separator: ".", maxSplits: 1).map(String.init) ?? []
+                guard parts.count == 2, path.count == 2, let value = Double(parts[1]) else { continue }
+                engine.renderer.parameters[path[0], default: [:]][path[1]] = .number(value)
+            }
             engine.start()
             self.engine = engine
             if arguments.contains("--debug-stall") { startStalling() }

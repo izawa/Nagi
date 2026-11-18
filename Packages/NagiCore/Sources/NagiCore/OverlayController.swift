@@ -26,8 +26,11 @@ import QuartzCore
         didSet { for overlay in overlays.values { overlay.window.sharingType = sharingType } }
     }
 
-    init(device: any MTLDevice) {
+    private let measurement: MeasurementOptions
+
+    init(device: any MTLDevice, measurement: MeasurementOptions) {
         self.device = device
+        self.measurement = measurement
         rebuild()
     }
 
@@ -37,7 +40,7 @@ import QuartzCore
         for screen in NSScreen.screens {
             guard let id = screen.displayID else { continue }
             seen.insert(id)
-            let view = Self.displayView(screen, id: id)
+            let view = Self.displayView(screen, id: id, drawableScale: measurement.drawableScale)
             if let existing = overlays[id], existing.view.frameInDesktop == view.frameInDesktop,
                existing.view.scale == view.scale {
                 overlays[id]?.view = view
@@ -94,9 +97,11 @@ import QuartzCore
 
         let layer = CAMetalLayer()
         layer.device = device
-        layer.pixelFormat = FrameRenderer.workingFormat
-        layer.colorspace = CGColorSpace(name: CGColorSpace.extendedLinearDisplayP3)
-        layer.wantsExtendedDynamicRangeContent = true
+        // 8-bit only for empty-frame measurements: the final pass draws 16-bit float.
+        let eightBit = measurement.eightBit && measurement.emptyFrames
+        layer.pixelFormat = eightBit ? .bgra8Unorm : FrameRenderer.workingFormat
+        layer.colorspace = CGColorSpace(name: eightBit ? CGColorSpace.sRGB : CGColorSpace.extendedLinearDisplayP3)
+        layer.wantsExtendedDynamicRangeContent = measurement.edr
         layer.isOpaque = false
         layer.framebufferOnly = true
         layer.contentsScale = view.scale
@@ -111,7 +116,8 @@ import QuartzCore
         }
         let link = CAMetalDisplayLink(metalLayer: layer)
         link.delegate = target
-        link.preferredFrameRateRange = CAFrameRateRange(minimum: 30, maximum: 120, preferred: 120)
+        let rate = measurement.maxFrameRate
+        link.preferredFrameRateRange = CAFrameRateRange(minimum: min(30, rate), maximum: rate, preferred: rate)
         link.isPaused = !isShown
         // .common so frames keep coming while a menu is being tracked.
         link.add(to: .main, forMode: .common)
@@ -119,8 +125,8 @@ import QuartzCore
         return Overlay(window: window, layer: layer, link: link, linkTarget: target, view: view)
     }
 
-    private static func displayView(_ screen: NSScreen, id: UInt32) -> DisplayView {
-        let scale = screen.backingScaleFactor
+    private static func displayView(_ screen: NSScreen, id: UInt32, drawableScale: Double) -> DisplayView {
+        let scale = screen.backingScaleFactor * drawableScale
         let primaryHeight = NSScreen.screens.first?.frame.height ?? screen.frame.height
         let frame = screen.frame
         let physical = CGDisplayScreenSize(id)

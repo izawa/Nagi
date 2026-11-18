@@ -8,6 +8,7 @@
 // --param key=value sets an effect parameter (number, true/false, or a choice key).
 
 import CoreGraphics
+import ImageIO
 import DebugEffects
 import EffectCatalog
 import Foundation
@@ -37,11 +38,19 @@ import NagiKit
     let points = CGSize(width: Double(options.size.x) / 2, height: Double(options.size.y) / 2)
     let view = DisplayView(id: 1, pixelSize: options.size, scale: 2, frameInDesktop: CGRect(origin: .zero, size: points),
                            physicalSize: options.physicalSize, edrHeadroom: 1, potentialEDRHeadroom: 1)
+    let location = options.location ?? EnvironmentModel.defaultLocation(at: options.date)
     let frame = FrameState(time: options.time, deltaTime: 1.0 / 60, date: options.date, phase: .calm,
                            presence: options.presence, depth: options.depth, appearance: options.appearance,
-                           seed: options.seed)
-    let screen = try renderer.renderOffscreen(frame, view: view, strength: options.strength, background: options.background)
-    try TextureReader.writePNG(screen, to: options.output)
+                           seed: options.seed, environment: EnvironmentModel.environment(at: options.date, location: location))
+    if options.debugAlpha {
+        // The overlay's alpha alone, stretched so its largest value is white: shows the pattern
+        // that is only a few per cent strong on screen.
+        let overlay = try renderer.renderOverlay(frame, view: view, strength: options.strength)
+        try writeAlpha(TextureReader.pixels(of: overlay), size: options.size, to: options.output)
+    } else {
+        let screen = try renderer.renderOffscreen(frame, view: view, strength: options.strength, background: options.background)
+        try TextureReader.writePNG(screen, to: options.output)
+    }
     print(options.output.path)
 }
 
@@ -58,6 +67,8 @@ struct Options {
     var physicalSize: SIMD2<Double>?
     var parameters: [String: ParameterValue] = [:]
     var output = URL(fileURLWithPath: "nagi.png")
+    var location: GeoLocation?
+    var debugAlpha = false
 
     init(_ arguments: [String]) throws {
         var index = 0
@@ -98,11 +109,33 @@ struct Options {
                 parameters[parts[0]] = Double(parts[1]).map { .number($0) }
                     ?? (["true", "false"].contains(parts[1]) ? .flag(parts[1] == "true") : .choice(parts[1]))
             case "--output": output = URL(fileURLWithPath: try value())
+            case "--debug-alpha":
+                debugAlpha = true
+                index += 1
+                continue
+            case "--location":
+                let latLon = try pair(value().replacingOccurrences(of: ",", with: "x")) { Double($0) }
+                location = GeoLocation(latitude: latLon.x, longitude: latLon.y)
             default: throw usage()
             }
             index += 1
         }
     }
+}
+
+func writeAlpha(_ pixels: [SIMD4<Float>], size: SIMD2<Int>, to url: URL) throws {
+    let peak = max(pixels.map(\.w).max() ?? 0, 1e-6)
+    let bytes = pixels.map { UInt8(min(max($0.w / peak, 0), 1) * 255) }
+    let data = Data(bytes) as CFData
+    guard let provider = CGDataProvider(data: data),
+          let image = CGImage(width: size.x, height: size.y, bitsPerComponent: 8, bitsPerPixel: 8, bytesPerRow: size.x,
+                              space: CGColorSpaceCreateDeviceGray(), bitmapInfo: CGBitmapInfo(rawValue: 0),
+                              provider: provider, decode: nil, shouldInterpolate: false, intent: .defaultIntent),
+          let destination = CGImageDestinationCreateWithURL(url as CFURL, "public.png" as CFString, 1, nil)
+    else { throw NagiCoreError("could not write \(url.path)") }
+    CGImageDestinationAddImage(destination, image, nil)
+    guard CGImageDestinationFinalize(destination) else { throw NagiCoreError("could not write \(url.path)") }
+    print("alpha peak \(peak)")
 }
 
 func number(_ text: String) throws -> Double {
@@ -126,7 +159,7 @@ func usage() -> NagiCoreError {
     NagiCoreError("""
     usage: nagi-render <effect[,effect…]> [--at ISO8601] [--time s] [--depth s] [--presence 0…1] \
     [--strength 0…1] [--appearance light|dark] [--seed n] [--background gray:<0…1>|<image>] \
-    [--size WxH] [--physical-mm WxH] [--param key=value]… [--output file.png]
+    [--size WxH] [--physical-mm WxH] [--location lat,lon] [--param key=value]… [--debug-alpha] [--output file.png]
     """)
 }
 

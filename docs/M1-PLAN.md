@@ -80,6 +80,18 @@ Fixtures/               nagi-render と試験で使う背景の画像とウィ�
 
 道具: 凪は `build/Nagi.app` を `--trace --sharing-readonly --debug-patch …` で起動する。入力の記録は `NagiFixture --scene input`、取り込みは `NagiSpike-granted --run capture --watch x,y`(紫の四角の中心)、集計は `Spikes/scripts/withdrawal.py`。
 
+### 3.2 区切り B の進め方
+
+約 20 分。木漏れ日を実際の画面に出し、日時を正午に固定して見る(`--debug-date`)。値は起動し直して変える(`--effect-param komorebi.<名前>=<値>`)。
+
+| 回 | 時間 | 作者の操作 | 決めること |
+|---|---|---|---|
+| B1 ライト | 約 7 分 | いつもの作業のウィンドウ(本文の多いもの)の上で、浅い凪と深い凪を見る。光の円の数と大きさ、葉の形、縁の段、縞、本文の読みやすさ | 影の濃さ(`lightAlpha`、既定 0.08)、露出(`exposure`、既定 12)、樹冠の密度(`density`) |
+| B2 ダーク | 約 7 分 | ダークの外観に切り替えて、同じように見る | 光の強さ(`darkAlpha`、既定 0.12) |
+| B3 EDR | 約 5 分 | ダークの外観で、白いウィンドウの上の光が白より明るく見えるかを見る | EDR の明るさ(`edrGain`、既定 2) |
+
+木漏れ日はまだ動かない(風は段階 4)。30 fps と 60 fps の見比べは、動きが入る区切り C で行う。
+
 ## 4. NagiKit と NagiCore
 
 ### 4.1 エフェクト API
