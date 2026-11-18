@@ -2,7 +2,8 @@
 //
 // One probe per launch, results as JSON Lines on stdout:
 //   open -n -g -W --stdout <file> build/spikes/NagiSpike-plain.app --args --run <probe> [options]
-// Probes: header, s9, s3, s5, overlay, ramp, edr (S2), glass (S8). Every run exits by itself after --duration seconds
+// Probes: header, s9, s3, s5, overlay, ramp, edr (S2), glass (S8), markers (S6),
+// capture and permission (S4, granted only), composite (S2 numeric, granted only). Every run exits by itself after --duration seconds
 // (default 20, max 600); the status item's menu can also quit it.
 //
 // Rule for the .plain variants: never call CGRequestScreenCaptureAccess, SCShareableContent
@@ -26,6 +27,9 @@ struct Options {
     var edr = true             // overlay, ramp: request EDR on the rgba16Float layers
     var maxAlpha = 0.08        // ramp: darkening at the right edge
     var gain = 2.0             // edr: patch color relative to SDR white
+    var filter = "self"        // capture: "self" excludes this app's windows, "none" captures everything
+    var trials = 0             // capture: number of start/stop trials; 0 runs one stream until --duration
+    var captureScale = 1.0     // capture: output size relative to the display's pixels (load comparison)
 
     init(_ arguments: [String]) {
         var values: [String: String] = [:]
@@ -45,6 +49,9 @@ struct Options {
         edr = values["edr"].map { $0 != "0" } ?? edr
         maxAlpha = Double(values["max-alpha"] ?? "") ?? maxAlpha
         gain = Double(values["gain"] ?? "") ?? gain
+        if let value = values["filter"], ["self", "none"].contains(value) { filter = value }
+        trials = max(Int(values["trials"] ?? "") ?? trials, 0)
+        if let scale = Double(values["capture-scale"] ?? ""), scale.isFinite { captureScale = min(max(scale, 0.1), 1) }
     }
 }
 
@@ -81,6 +88,26 @@ struct Options {
             probe = RampProbe(options: options)
         case "glass":
             probe = GlassProbe(options: options)
+        case "markers":
+            probe = MarkerPairProbe(options: options)
+        case "capture", "composite", "permission":
+            // Capture APIs only in the .granted variants (see the rule at the top of this file).
+            guard Bundle.main.bundleIdentifier?.contains(".granted") == true else {
+                SpikeLog.emit("error", ["message": "\(options.run) runs only in the .granted variants"])
+                Self.quit(reason: "error")
+                return
+            }
+            switch options.run {
+            case "capture": probe = CaptureProbe(options: options)
+            case "composite": probe = CompositeProbe(options: options)
+            default:
+                // S4: the permission dialog. Deny, allow and revoke each leave this record.
+                let before = CGPreflightScreenCaptureAccess()
+                let granted = CGRequestScreenCaptureAccess()
+                SpikeLog.emit("s4-permission", ["preflightBefore": before, "requestResult": granted,
+                                                "preflightAfter": CGPreflightScreenCaptureAccess()])
+                Self.quit(reason: "done")
+            }
         default:
             SpikeLog.emit("error", ["message": "unknown --run \(options.run)"])
             Self.quit(reason: "error")

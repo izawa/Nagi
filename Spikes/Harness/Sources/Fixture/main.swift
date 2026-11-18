@@ -6,14 +6,19 @@ import SpikeLog
 private enum Scene: String {
     case panels
     case s5
+    case flash
 }
 
 @MainActor
 private final class FixtureView: NSView {
-    private let gray: CGFloat
+    var gray: CGFloat {
+        didSet { needsDisplay = true }
+    }
+    private let showsReference: Bool
 
-    init(gray: CGFloat) {
+    init(gray: CGFloat, showsReference: Bool) {
         self.gray = gray
+        self.showsReference = showsReference
         super.init(frame: .zero)
     }
 
@@ -28,6 +33,7 @@ private final class FixtureView: NSView {
     override func draw(_ dirtyRect: NSRect) {
         NSColor(srgbRed: gray, green: gray, blue: gray, alpha: 1).setFill()
         dirtyRect.fill()
+        guard showsReference else { return }
 
         let gridGray = gray < 0.5 ? gray + 0.16 : gray - 0.16
         NSColor(srgbRed: gridGray, green: gridGray, blue: gridGray, alpha: 1).setFill()
@@ -55,6 +61,7 @@ private final class FixtureView: NSView {
 private final class Fixture: NSObject, NSApplicationDelegate {
     private let scene: Scene
     private let duration: TimeInterval
+    private let grays: [CGFloat]
     private let logQueue = DispatchQueue(label: "Fixture.log")
     private var exitTimer: (any DispatchSourceTimer)?
     private var windows: [(window: NSWindow, gray: CGFloat)] = []
@@ -62,9 +69,10 @@ private final class Fixture: NSObject, NSApplicationDelegate {
     private var initialFrames: [CGRect] = []
     private var stepIndex = 0
 
-    init(scene: Scene, duration: TimeInterval) {
+    init(scene: Scene, duration: TimeInterval, grays: [CGFloat]) {
         self.scene = scene
         self.duration = duration
+        self.grays = grays
         super.init()
     }
 
@@ -79,18 +87,29 @@ private final class Fixture: NSObject, NSApplicationDelegate {
 
         switch scene {
         case .panels:
-            let shades: [CGFloat] = [0.1, 0.5, 1.0]
-            for (index, gray) in shades.enumerated() {
-                let offset = CGFloat(index - (shades.count - 1)) * (base.width + 12)
+            for (index, gray) in grays.enumerated() {
+                let offset = CGFloat(index - (grays.count - 1)) * (base.width + 12)
                 addWindow("Gray \(gray)", gray: gray, frame: base.offsetBy(dx: offset, dy: 0))
             }
         case .s5:
             addWindow("A", gray: 0.22, frame: base.offsetBy(dx: -132, dy: 72))
             addWindow("B", gray: 0.76, frame: base.offsetBy(dx: -30, dy: 20))
             initialFrames = windows.map { $0.window.frame }
+        case .flash:
+            let frame = CGRect(x: visible.minX + 24, y: visible.minY + 24, width: 200, height: 200)
+            let view = addWindow("Flash", gray: 0, frame: frame, style: .borderless)
+            let timer = Timer(timeInterval: 0.2, repeats: true) { @Sendable [weak view] _ in
+                MainActor.assumeIsolated {
+                    guard let view else { return }
+                    view.gray = 1 - view.gray
+                    // S4 compares this time with the capture's first sample of the new colour.
+                    SpikeLog.emit("flash-toggle", ["gray": view.gray])
+                }
+            }
+            RunLoop.main.add(timer, forMode: .common)
         }
 
-        logWindows("ready", ["duration": duration])
+        logWindows(scene == .flash ? "flash-ready" : "ready", ["duration": duration])
 
         // Keep the timeout independent of AppKit's run loop. SpikeLog flushes stdout.
         let timer = DispatchSource.makeTimerSource(queue: logQueue)
@@ -112,8 +131,8 @@ private final class Fixture: NSObject, NSApplicationDelegate {
         }
     }
 
-    private func addWindow(_ title: String, gray: CGFloat, frame: CGRect) {
-        let style: NSWindow.StyleMask = .titled
+    @discardableResult
+    private func addWindow(_ title: String, gray: CGFloat, frame: CGRect, style: NSWindow.StyleMask = .titled) -> FixtureView {
         let window = NSWindow(
             contentRect: NSWindow.contentRect(forFrameRect: frame, styleMask: style),
             styleMask: style,
@@ -121,16 +140,20 @@ private final class Fixture: NSObject, NSApplicationDelegate {
             defer: false
         )
         window.title = title
-        window.level = .normal
+        // Panels and the flash stay above the author's windows, which come to the front as they work;
+        // S5 checks the order of ordinary windows, so its windows stay at the normal level.
+        window.level = scene == .s5 ? .normal : .floating
         window.isMovable = false
         window.tabbingMode = .disallowed
         window.animationBehavior = .none
         window.colorSpace = .sRGB
-        window.contentView = FixtureView(gray: gray)
+        let view = FixtureView(gray: gray, showsReference: scene != .flash)
+        window.contentView = view
         windows.append((window, gray))
 
         // Show the scene on an inactive launch without changing the key window.
         window.orderFrontRegardless()
+        return view
     }
 
     private var orderedFixtureWindows: [NSWindow] {
@@ -213,30 +236,51 @@ private final class Fixture: NSObject, NSApplicationDelegate {
 private func main() {
     SpikeLog.header()
 
-    let arguments = Array(CommandLine.arguments.dropFirst())
-    guard (arguments.count == 2 || arguments.count == 4),
-          arguments[0] == "--scene", let scene = Scene(rawValue: arguments[1]) else {
-        SpikeLog.emit("error", ["message": "Usage: Fixture --scene panels|s5 [--duration seconds]"])
+    let usage = "Usage: Fixture --scene panels|s5|flash [--duration seconds] [--grays a,b,c]"
+    func fail(_ message: String) -> Never {
+        SpikeLog.emit("error", ["message": message])
         Darwin.exit(EXIT_FAILURE)
     }
 
-    let duration: TimeInterval
-    if arguments.count == 4 {
-        guard arguments[2] == "--duration", let seconds = Double(arguments[3]),
-              seconds.isFinite, seconds > 0 else {
-            SpikeLog.emit("error", ["message": "--duration requires a positive number of seconds"])
-            Darwin.exit(EXIT_FAILURE)
+    let arguments = Array(CommandLine.arguments.dropFirst())
+    var scene: Scene?
+    var duration: TimeInterval = 30
+    var grays: [CGFloat]?
+    var seen: Set<String> = []
+    guard arguments.count.isMultiple(of: 2) else { fail(usage) }
+    for index in stride(from: 0, to: arguments.count, by: 2) {
+        let option = arguments[index]
+        let value = arguments[index + 1]
+        guard seen.insert(option).inserted else { fail("Duplicate option \(option)") }
+        switch option {
+        case "--scene":
+            guard let selected = Scene(rawValue: value) else { fail(usage) }
+            scene = selected
+        case "--duration":
+            guard let seconds = Double(value), seconds.isFinite, seconds > 0 else {
+                fail("--duration requires a positive number of seconds")
+            }
+            duration = min(seconds, 600)
+        case "--grays":
+            let parts = value.split(separator: ",", omittingEmptySubsequences: false)
+            let values = parts.compactMap { Double($0) }
+            guard parts.count == 3, values.count == 3, values.allSatisfy({ (0...1).contains($0) }) else {
+                fail("--grays requires three comma-separated values between 0 and 1")
+            }
+            grays = values.map { CGFloat($0) }
+        default:
+            fail("Unknown option \(option)")
         }
-        duration = min(seconds, 600)
-    } else {
-        duration = 30
     }
+
+    guard let scene else { fail(usage) }
+    guard grays == nil || scene == .panels else { fail("--grays requires --scene panels") }
 
     let app = NSApplication.shared
     // Info.plist already makes this a regular app, in which case this returns false.
     app.setActivationPolicy(.regular)
 
-    let fixture = Fixture(scene: scene, duration: duration)
+    let fixture = Fixture(scene: scene, duration: duration, grays: grays ?? [0.1, 0.5, 1.0])
     app.delegate = fixture
     withExtendedLifetime(fixture) {
         app.run()
