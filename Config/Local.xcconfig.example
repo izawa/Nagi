@@ -1,0 +1,4 @@
+// Copy to Config/Local.xcconfig (not committed) and fill in.
+// SIGN_IDENTITY: a "Developer ID Application: …" name or its SHA-1 hash
+// (see `security find-identity -v -p codesigning`).
+SIGN_IDENTITY = Developer ID Application: Your Name (TEAMID1234)
