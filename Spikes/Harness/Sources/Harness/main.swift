@@ -2,7 +2,7 @@
 //
 // One probe per launch, results as JSON Lines on stdout:
 //   open -n -g -W --stdout <file> build/spikes/NagiSpike-plain.app --args --run <probe> [options]
-// Probes: header, s9, s3, s5, overlay, ramp, edr (S2), glass (S8), markers (S6),
+// Probes: header, s9, s3, s5, s10 (with --action), launch (S10: no arguments at all), overlay, ramp, edr (S2), glass (S8), markers (S6),
 // capture and permission (S4, granted only), composite (S2 numeric, granted only). Every run exits by itself after --duration seconds
 // (default 20, max 600); the status item's menu can also quit it.
 //
@@ -12,11 +12,13 @@
 import AppKit
 import CoreGraphics
 import Metal
+import os
 import ProbeShaders
 import SpikeLog
 
 struct Options {
-    var run = "header"
+    var run = "header"         // "launch" when there are no arguments at all (S10: macOS opens the app at login)
+    var action = "status"      // s10: status, register, unregister or settings
     var duration = 20.0
     var step = 6.0             // s3: seconds per input step
     var hz = 15.0              // s5 sampling rate
@@ -38,7 +40,8 @@ struct Options {
             if arguments[index].hasPrefix("--") { values[String(arguments[index].dropFirst(2))] = arguments[index + 1] }
             index += 1
         }
-        run = values["run"] ?? run
+        run = values["run"] ?? (arguments.isEmpty ? "launch" : run)
+        action = values["action"] ?? action
         duration = min(Double(values["duration"] ?? "") ?? duration, 600)
         if let seconds = Double(values["step"] ?? ""), seconds.isFinite, seconds > 0 { step = seconds }
         if let rate = Double(values["hz"] ?? ""), rate.isFinite, rate > 0 { hz = rate }
@@ -61,6 +64,9 @@ struct Options {
     var probe: AnyObject?  // keeps the running probe alive
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        if ["launch", "s10"].contains(options.run) {
+            SpikeLog.systemLog = Logger(subsystem: "org.izawa.nagi.spike", category: options.run)
+        }
         SpikeLog.header(["screenCapturePreflight": CGPreflightScreenCaptureAccess(), "options": "\(options)"])
         installStatusItem()
         Timer.scheduledTimer(withTimeInterval: options.duration, repeats: false) { _ in
@@ -68,6 +74,12 @@ struct Options {
         }
         switch options.run {
         case "header":
+            Self.quit(reason: "done")
+        case "launch":
+            LoginProbe.recordLaunch()
+            Self.quit(reason: "done")
+        case "s10":
+            LoginProbe.run(action: options.action)
             Self.quit(reason: "done")
         case "s9":
             runS9()

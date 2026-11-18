@@ -10,10 +10,10 @@
 | S4 | 3.9、5 | 通過 | 自分のアプリを除く `SCContentFilter`、`CVMetalTextureCache` でコピーなし。遅れ 20〜50 ms、開始 0.15 秒以内 |
 | S5 | 3.10 | 合格 | 許可なしで `CGWindowListCopyWindowInfo` から ID、矩形、前後の順序を取る |
 | S6 | 2.5、3.7 | 通過 | 既定は `.none`。スクリーンショット、ScreenCaptureKit、Zoom の画面共有のどれにも写らない |
-| S7 | 6.1 | 一部(S3・S4・S5 は Sandbox の下でも動いた) | S10 が残る |
+| S7 | 6.1 | 通過 | App Sandbox を有効にする(S3・S4・S5・S10 が Sandbox の下でも同じように動いた) |
 | S8 | 4.2 | 不採用 | 濃いすりガラスで、屈折にならない |
 | S9 | 3.2、3.12 | 合格 | SwiftPM の `.process` で metallib を作り、`Bundle.module` から読む |
-| S10 | 6.1 | 未実施 | |
+| S10 | 6.1 | 通過 | `SMAppService.mainApp`。ログインの起動は Apple イベントの `lgit` で見分けられる |
 
 共通の環境: Mac mini(Mac16,11、M4 Pro)、macOS 27.2.1、Xcode 27.2(27B52)、Swift 6.4.2、Studio Display 1 台(5K、60 Hz)。
 
@@ -162,6 +162,30 @@
   - Zoom の画面の共有を iPad で見た: 画面全体を共有すると、左の `.readOnly` だけが見えた。ウインドウを選んで共有すると、どちらも見えなかった(選んだウインドウの上に重なったほかのウインドウは、共有に入らない)
 - 仕様への反映: SPEC 3.7 の既定を `.none` にすれば、スクリーンショットと会議の画面共有に凪は写らない。SPEC 2.5 で「画面共有に写す」を選んだときは `.readOnly` にする。Apple のドキュメントは `.none` を古い値としているので、macOS の更新のたびに確かめ直す
 - 確かめていないこと: Zoom 以外の会議アプリ、画面の録画(⌘⇧5)
+
+### S10 ログイン時の起動
+
+- 判定: 通過。Sandbox なし・ありの 2 つの版で、すべて同じ結果だった
+- 手順(2026-11-18、立ち会い C。手順は M0-PLAN の 4.2): `NagiSpike-plain.app` と `NagiSpike-plain-sandboxed.app` を `/Applications` に置き、`--run s10 --action register|unregister|status|settings` で `SMAppService.mainApp` を操作した。引数なしで起動した Harness は、起動の Apple イベントと登録の状態を記録して終わる。ログインのときは `--stdout` がないので、記録を統一ログ(サブシステム `org.izawa.nagi.spike`)にも書き、`log show` で読んだ
+- 結果:
+  - 一度も登録していないアプリの状態は `notFound` だった。`register` で `enabled` になり、別のプロセスから読んでも `enabled` だった。登録すると、版ごとに「ログイン項目が追加されました／ログインすると “<アプリ名>” が自動的に開きます。 これは “ログイン項目と機能拡張” で管理できます。」の通知が出た
+  - 登録したまま再ログインすると、ログインの直後に 2 つの版が 1 回ずつ起動した。親は launchd(pid 1)で、起動の Apple イベントは `aevt`/`oapp`、`keyAEPropData` が `lgit`(`keyAELaunchedAsLogInItem`)だった。引数なしで手で `open` したときは同じ `oapp` で、`keyAEPropData` はなかった。ログインの起動は、この印で見分けられる
+  - `unregister` で `notRegistered` になり、そのまま再ログインすると、どちらの版も起動しなかった。再ログインのあとに読むと、状態は `notFound` に変わっていた
+  - アプリからシステム設定を開く(`SMAppService.openSystemSettingsLoginItems()`)と、「一般」→「ログイン項目」が開いた。2 つの版は「ログイン時に開く」の一覧に「アプリケーション」として載り、オンとオフの切り替えはなく、削除(−)だけだった。作者が削除すると、確認なしに一覧から消え、状態は `notFound` になった(`requiresApproval` にはならなかった)
+  - 利用者が削除したあとでも、アプリから `register` すると、確認なしに `enabled` に戻った。このときも、登録のときと同じ「ログイン項目が追加されました」の通知が版ごとに出た
+  - エラーは一度も起きなかった
+- 仕様への反映(SPEC 6.1):
+  - 設定の「ログイン時に起動」は、`status` が `enabled` のときだけオンと表示する。`notRegistered` と `notFound` はどちらもオフとして扱う。利用者がシステム設定で削除した場合も `notFound` になるので、区別しない
+  - 凪は起動のたびに自分で登録し直さない。利用者がシステム設定で削除しても、アプリから黙って登録できてしまうため。登録と解除は、利用者が設定を変えたときだけ行う
+  - `requiresApproval` はこの試験では一度も出なかった。出たときは「システム設定で許可してください」と案内して `openSystemSettingsLoginItems()` を開く、という扱いを残す
+  - ログインで起動したときに何か振る舞いを変えるなら、`lgit` の印で見分けられる
+- 確かめていないこと: `requiresApproval` になる条件、アプリを `/Applications` から動かしたときや作り直したときの振る舞い
+
+### S7 App Sandbox
+
+- 判定: 通過。App Sandbox を有効にする(計画の規則「全部通れば Sandbox を有効にする」による)
+- 結果: Sandbox ありの版(`com.apple.security.app-sandbox` だけを付け、Developer ID と Hardened Runtime で署名)でも、S3(無入力の秒数、電源アサーション、画面の状態の通知)、S4(画面の取り込み、自分のアプリの除外、許可の流れ)、S5(許可なしのウインドウ情報)、S10(ログイン時の起動)が、Sandbox なしの版と同じように動いた。Sandbox のための追加の entitlement は要らなかった
+- 確かめていないこと: S5 の 1 回の取得の時間は、Sandbox ありの版のほうが長かった(中央値 9.4 ms と 3.1 ms)が、それぞれ 1 回ずつの測定で、Sandbox による差かどうかは繰り返していない
 
 ### S8 NSGlassEffectView
 
