@@ -55,9 +55,11 @@ struct LayerStyle {
     }
 
     /// The farthest a leaf can move: the mean wind and a full gust each give up to the trunk and
-    /// branch amplitudes, and a turn swings a twig's far end.
+    /// branch amplitudes, a gust drags up to three trunk amplitudes more (`gustLean`), and a turn
+    /// swings a twig's far end.
     var swayReach: Double {
-        2 * (sway.trunk + sway.branch) * 1.5 + sway.branchTurn * .pi / 180 * (chainReach + 1.5 * clusterRadius)
+        2 * (sway.trunk + sway.branch) * 1.5 + 3 * sway.trunk
+            + sway.branchTurn * .pi / 180 * (chainReach + 1.5 * clusterRadius)
     }
 
     /// How far a twig reaches from its first gap, plus how far a split opening's centre can move

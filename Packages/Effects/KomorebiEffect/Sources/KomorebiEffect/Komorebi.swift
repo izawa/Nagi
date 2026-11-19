@@ -21,6 +21,9 @@ public final class Komorebi: Effect {
             ParameterSpec(key: "strength", label: "強さ", kind: .slider(range: 0...1, defaultValue: 1)),
             ParameterSpec(key: "density", label: "樹冠の密度", kind: .slider(range: 0.3...1.5, defaultValue: 1)),
             ParameterSpec(key: "wind", label: "風の強さ", kind: .slider(range: 0...1, defaultValue: 0.5)),
+            // How far a gust drags the canopy downwind, in trunk amplitudes: 2.5 looked real to the
+            // author at stop C (DECISIONS D25).
+            ParameterSpec(key: "gustLean", label: "突風の引きずり", kind: .slider(range: 0...3, defaultValue: 2.5)),
             ParameterSpec(key: "scale", label: "スケール", kind: .slider(range: 0.5...2, defaultValue: 1)),
             ParameterSpec(key: "moonlight", label: "月明かり", kind: .toggle(defaultValue: true)),
             // The strongest moonlight (a full moon high in a dark sky), as alpha: 0.08, where the
@@ -411,6 +414,7 @@ public final class Komorebi: Effect {
         uniforms.trunk = phases(trunkWaves)
         uniforms.branch = phases(branchWaves)
         uniforms.flutter = phases(flutterWaves)
+        uniforms.lean = SIMD4(Float(clamped(frame.number("gustLean", default: 2.5), 0...3, default: 2.5)), 0, 0, 0)
         withUnsafeMutableBytes(of: &uniforms.gusts) { raw in
             let slots = raw.bindMemory(to: SIMD4<Float>.self)
             for (index, gust) in gusts.enumerated() {
@@ -466,6 +470,7 @@ struct SwayUniforms {
     var trunk = SIMD4<Float>.zero
     var branch = SIMD4<Float>.zero
     var flutter = SIMD4<Float>.zero
+    var lean = SIMD4<Float>.zero
     var gusts = (SIMD4<Float>.zero, SIMD4<Float>.zero, SIMD4<Float>.zero, SIMD4<Float>.zero,
                  SIMD4<Float>.zero, SIMD4<Float>.zero, SIMD4<Float>.zero, SIMD4<Float>.zero)
 

@@ -12,6 +12,9 @@ public enum WindModel {
     /// Each interval holds at most one gust.
     static let gustInterval = 12.0
     static let gustChance = 0.6
+    /// The prevailing direction turns slowly: a knot every three hours, within ±90° of the seed's
+    /// direction (the author's choice at stop C: the wind should not always come from one side).
+    static let prevailingSpacing = 3 * 3600.0
     /// The strongest mean wind, metres per second.
     static let maximumSpeed = 3.5
     /// A gust can be felt this long before or after it passes the desktop origin: the front's delay
@@ -21,6 +24,7 @@ public enum WindModel {
     public static func wind(at time: Double, seed: UInt64) -> Wind {
         let time = Knots.clamped(time)
         let prevailing = Knots.unit(seed, stream: 0, index: 0) * 2 * .pi
+            + Knots.value(at: time, spacing: prevailingSpacing, seed: seed, stream: 8, -.pi / 2, .pi / 2)
         func mix(_ stream: UInt64, _ low: Double, _ high: Double) -> Double {
             Knots.value(at: time, spacing: knotSpacing, seed: seed, stream: stream, low, high)
         }

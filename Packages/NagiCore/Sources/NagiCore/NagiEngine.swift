@@ -331,11 +331,11 @@ public struct MeasurementOptions: Sendable {
     public var edr = true
     /// The overlay's pixel size relative to the display's.
     public var drawableScale = 1.0
-    /// Highest frame rate asked of the display link.
-    public var maxFrameRate: Float = 120
+    /// Highest frame rate asked of the display link: 60, the author's choice at stop C (D25).
+    public var maxFrameRate: Float = 60
     /// An 8-bit sRGB drawable instead of 16-bit float (empty frames only: the effects draw float).
     public var eightBit = false
-    public init(emptyFrames: Bool = false, edr: Bool = true, drawableScale: Double = 1, maxFrameRate: Float = 120,
+    public init(emptyFrames: Bool = false, edr: Bool = true, drawableScale: Double = 1, maxFrameRate: Float = 60,
                 eightBit: Bool = false) {
         self.emptyFrames = emptyFrames
         self.edr = edr

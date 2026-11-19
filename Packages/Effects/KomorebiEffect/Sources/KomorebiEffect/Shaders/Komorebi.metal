@@ -42,6 +42,7 @@ struct SwayUniforms {
     float4 trunk;       // phases (cycles) of the trunk's three waves, 0.1–0.3 Hz
     float4 branch;      // of the branch's, 0.5–1 Hz
     float4 flutter;     // of the leaf's, 2–5 Hz
+    float4 lean;        // x: how far a gust drags the canopy downwind, in trunk amplitudes
     float4 gusts[8];    // onset − now (s), rise (s), duration (s), strength
 };
 
@@ -76,7 +77,9 @@ static float2 swayed(Leaf leaf, float2 offset, constant SwayUniforms &sway, thre
     float gust = gustAt(leaf.anchor + offset, sway);
     float push = gain * (sway.strength.y + gust);
     float region = valueNoise(leaf.anchor / 1500.0);
-    float2 trunk = sway.amplitude.x * push
+    // A gust drags the whole canopy downwind, beyond the sway it also strengthens (stop C).
+    float2 trunk = along * (sway.amplitude.x * gain * sway.lean.x * gust)
+                 + sway.amplitude.x * push
                  * (along * (0.6 + 0.4 * waves(sway.trunk, float3(0.1 * region)))
                     + across * 0.5 * waves(sway.trunk, float3(0.37, 0.61, 0.83) + 0.1 * region));
     float3 seed = float3(hash(leaf.anchor), hash(leaf.anchor + 17.0), hash(leaf.anchor + 31.0));

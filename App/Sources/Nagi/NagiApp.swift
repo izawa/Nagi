@@ -87,7 +87,7 @@ import SwiftUI
                 edr: !arguments.contains("--debug-no-edr"),
                 drawableScale: Self.value(after: "--debug-drawable-scale", in: arguments).flatMap(Double.init)
                     .flatMap { (0.1...2).contains($0) ? $0 : nil } ?? 1,
-                maxFrameRate: Self.value(after: "--debug-max-fps", in: arguments).flatMap(Float.init) ?? 120,
+                maxFrameRate: Self.value(after: "--debug-max-fps", in: arguments).flatMap(Float.init) ?? 60,
                 eightBit: arguments.contains("--debug-eight-bit"))
             let engine = try NagiEngine(effects: effects, trace: arguments.contains("--trace"), measurement: measurement)
             if let patch { engine.renderer.parameters[PatchEffect.descriptor.id] = patch }
