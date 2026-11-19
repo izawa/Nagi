@@ -23,6 +23,9 @@ public final class Komorebi: Effect {
             ParameterSpec(key: "wind", label: "風の強さ", kind: .slider(range: 0...1, defaultValue: 0.5)),
             ParameterSpec(key: "scale", label: "スケール", kind: .slider(range: 0.5...2, defaultValue: 1)),
             ParameterSpec(key: "moonlight", label: "月明かり", kind: .toggle(defaultValue: true)),
+            // The strongest moonlight (a full moon high in a dark sky), as alpha: 0.08, where the
+            // author could see it in both appearances (DECISIONS D21).
+            ParameterSpec(key: "moonAlpha", label: "月明かりの強さ", kind: .slider(range: 0...0.1, defaultValue: 0.08)),
             // Tuned at stop B (M1-PLAN 3): the strongest shadow in light appearance (DECISIONS D3),
             // and the light in dark appearance with its EDR gain cap.
             ParameterSpec(key: "lightAlpha", label: "影の濃さ", kind: .slider(range: 0...0.4, defaultValue: 0.2)),
@@ -92,12 +95,15 @@ public final class Komorebi: Effect {
     private var frameCount = 0
 
     public func render(_ frame: FrameState, view: DisplayView, encoder: any EffectEncoder) throws {
-        let sun = frame.environment.sun
-        guard sun.altitude > Self.cutoffAltitude else { return }
+        guard let light = Self.lightSource(frame) else { return }
+        let sun = light.position
         // Clouds do not fade the effect: they melt it towards its mean (the composite, DECISIONS D20).
-        let clearSky = smoothstep(Self.cutoffAltitude, Self.fadeAltitude, sun.altitude)
+        let clearSky = light.weight
         let strength = frame.number("strength", default: 1) * (frame.accessibility.reduceStrength ? 0.6 : 1)
-        guard clearSky * strength > 0 else { return }
+        let dark = frame.appearance == .dark
+        let peak = light.isMoon ? Self.clamped(frame.number("moonAlpha", default: 0.08), 0...0.1, default: 0.08)
+            : frame.number(dark ? "darkAlpha" : "lightAlpha", default: 0.2)
+        guard clearSky * strength * peak > 0 else { return }
 
         // Display origins use one desktop-wide scale so neighbouring displays meet in the canopy;
         // positions inside a display use its own pitch (SPEC 3.4).
@@ -128,15 +134,18 @@ public final class Komorebi: Effect {
             textures.append(resources.filtered)
         }
 
-        let dark = frame.appearance == .dark
-        let edr = Self.descriptor.capabilities.contains(.extendedRange) && view.edrHeadroom > 1
+        let edr = Self.descriptor.capabilities.contains(.extendedRange) && view.edrHeadroom > 1 && !light.isMoon
         let sunColour = Self.sunColour(kelvin: frame.environment.sunColorTemperature)
-        let colour: SIMD3<Float> = dark
-            ? sunColour * Float(edr ? min(view.edrHeadroom, frame.number("edrGain", default: 2)) : 1)
-            : SIMD3(0.0, 0.006, 0.014)  // near-black, a little green-blue (SPEC 4.1)
+        let colour: SIMD3<Float> = switch (dark, light.isMoon) {
+        case (true, false): sunColour * Float(edr ? min(view.edrHeadroom, frame.number("edrGain", default: 2)) : 1)
+        case (false, false): SIMD3(0.0, 0.006, 0.014)  // near-black, a little green-blue (SPEC 4.1)
+        // Moonlight: silver-blue light, a bluer shade; night vision loses colour and leans blue (D21).
+        case (true, true): SIMD3(0.65, 0.76, 0.90)
+        case (false, true): SIMD3(0.003, 0.008, 0.018)
+        }
         var composite = CompositeUniforms(
             display: SIMD4(Float(origin.x), Float(origin.y), Float(1 / view.scale), Float(millimetresPerPoint)),
-            output: SIMD4(Float(frame.number(dark ? "darkAlpha" : "lightAlpha", default: 0.2) * strength),
+            output: SIMD4(Float(peak * strength),
                           Float(clearSky), dark ? 1 : 0, Float(Self.clamped(frame.number("exposure", default: 12), 1...40, default: 12))),
             colour: SIMD4(colour, Float(frame.number("shadowCurve", default: 0.7))),
             sky: SIMD4(Float(min(max(frame.environment.sunOcclusion, 0), 1)), Float(view.pixelSize.x),
@@ -328,6 +337,25 @@ public final class Komorebi: Effect {
             descriptor.colorAttachments[0].destinationAlphaBlendFactor = .one
         }
         return try device.makeRenderPipelineState(descriptor: descriptor)
+    }
+
+    // MARK: - Light source
+
+    /// What lights the canopy: the sun by day; at night, if moonlight is on, the moon (DECISIONS
+    /// D21), weighted by how dark the sky is (it comes in through civil twilight), how high the
+    /// moon is (the same 5–10° fade as the sun) and how much of it is lit. Nil when nothing does.
+    static func lightSource(_ frame: FrameState) -> (position: CelestialPosition, weight: Double, isMoon: Bool)? {
+        let environment = frame.environment
+        let day = smoothstep(cutoffAltitude, fadeAltitude, environment.sun.altitude)
+        if day > 0 { return (environment.sun, day, false) }
+        guard frame.flag("moonlight", default: true) else { return nil }
+        let degree = Double.pi / 180
+        let darkness = 1 - smoothstep(-6 * degree, 0, environment.sun.altitude)
+        let lit = (1 - cos(2 * .pi * environment.moonPhase)) / 2
+        // Clear around new moon: under 1 % lit counts as dark, without a step.
+        let phase = max(0, (lit - 0.01) / 0.99)
+        let weight = darkness * smoothstep(cutoffAltitude, fadeAltitude, environment.moon.altitude) * phase
+        return weight > 0 ? (environment.moon, weight, true) : nil
     }
 
     // MARK: - Wind
