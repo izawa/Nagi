@@ -1,0 +1,126 @@
+{
+  "sourceLanguage": "ja",
+  "strings": {
+    "木漏れ日": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Komorebi"
+          }
+        }
+      }
+    },
+    "梢の隙間から落ちる日の光": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sunlight falling through the treetops"
+          }
+        }
+      }
+    },
+    "樹冠の密度": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Canopy Density"
+          }
+        }
+      }
+    },
+    "風の強さ": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Wind"
+          }
+        }
+      }
+    },
+    "弱い": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Light"
+          }
+        }
+      }
+    },
+    "ふつう": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Normal"
+          }
+        }
+      }
+    },
+    "強い": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Strong"
+          }
+        }
+      }
+    },
+    "スケール": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Scale"
+          }
+        }
+      }
+    },
+    "月明かり": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Moonlight"
+          }
+        }
+      }
+    },
+    "日が沈んでいます。木漏れ日は月明かりで薄く現れます": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The sun has set. Komorebi appears faintly by moonlight."
+          }
+        }
+      }
+    },
+    "日が低いので、木漏れ日は現れません": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The sun is too low for komorebi to appear."
+          }
+        }
+      }
+    },
+    "日が沈んでいるので、木漏れ日は現れません": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The sun has set, so komorebi does not appear."
+          }
+        }
+      }
+    }
+  },
+  "version": "1.0"
+}

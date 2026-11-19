@@ -14,10 +14,17 @@ import NagiKit
     public let device: any MTLDevice
     public let queue: any MTLCommandQueue
     private let effects: [(descriptor: EffectDescriptor, instance: any Effect)]
+    /// The ids of the effects this renderer runs.
+    public var effectIDs: [String] { effects.map(\.descriptor.id) }
     private let gainPipeline: any MTLRenderPipelineState
     private let blendPipeline: any MTLRenderPipelineState
     /// Saved parameter values by effect id and key; missing keys use the declared defaults.
     public var parameters: [String: [String: ParameterValue]] = [:]
+    /// Effects the user switched off: they neither update nor draw.
+    public var disabledIDs: Set<String> = [] {
+        didSet { running = effects.filter { !disabledIDs.contains($0.descriptor.id) } }
+    }
+    private var running: [(descriptor: EffectDescriptor, instance: any Effect)]
     private var accumulation: [UInt32: any MTLTexture] = [:]
     private var backdropScratch: [UInt32: any MTLTexture] = [:]
     /// The overlay of a preview, before it is put over the background (DECISIONS D24).
@@ -30,6 +37,7 @@ import NagiKit
         let context = EffectContext(device: device, pixelFormat: Self.workingFormat)
         effects = try types.map { (descriptor: $0.descriptor, instance: try $0.init(context: context)) }
             .sorted { $0.descriptor.layer < $1.descriptor.layer }
+        running = effects
         let library = try device.makeDefaultLibrary(bundle: Bundle.module)
         gainPipeline = try Self.pipeline(device, library, fragment: "gainFragment")
         blendPipeline = try Self.pipeline(device, library, fragment: "desktopBlendFragment")
@@ -40,8 +48,13 @@ import NagiKit
         effects.lazy.compactMap { $0.instance as? E }.first
     }
 
+    /// The running effects' notes for `frame` (Effect.note), with their parameters.
+    public func notes(_ frame: FrameState) -> [LocalizedStringResource] {
+        running.compactMap { type(of: $0.instance).note(frame.with($0.descriptor, parameters)) }
+    }
+
     public func update(_ frame: FrameState) {
-        for effect in effects { effect.instance.update(frame.with(effect.descriptor, parameters)) }
+        for effect in running { effect.instance.update(frame.with(effect.descriptor, parameters)) }
     }
 
     /// Encodes one display's frame into `target` (the live drawable or an offscreen texture):
@@ -57,7 +70,7 @@ import NagiKit
         commandBuffer.makeRenderCommandEncoder(descriptor: clear)?.endEncoding()
 
         let gain = Float(frame.presence * strength)
-        for effect in effects {
+        for effect in running {
             var effectView = view
             effectView.backdrop = nil
             if effect.descriptor.capabilities.contains(.backdrop), let backdrop = view.backdrop {

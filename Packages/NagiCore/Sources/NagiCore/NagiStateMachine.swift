@@ -12,6 +12,8 @@ public struct NagiTiming: Sendable {
     public let depthDecayPerActiveSecond: Double
     public let mediaGrace: Double
     public let previewDuration: Double
+    /// Depth gained per second of stillness: 1 normally, 0.5 for "slow" (settings, D26).
+    public let depthGrowthRate: Double
 
     public init(
         onset: Double = 3.0,
@@ -21,13 +23,14 @@ public struct NagiTiming: Sendable {
         leaveBudget: Double = 0.8,
         depthDecayPerActiveSecond: Double = 5,
         mediaGrace: Double = 3.0,
-        previewDuration: Double = 30
+        previewDuration: Double = 30,
+        depthGrowthRate: Double = 1
     ) {
         precondition((1...60).contains(onset), "Onset must be between 1 and 60 seconds")
         precondition(fadeOut < leaveBudget, "Fade-out must be shorter than the leave budget")
         precondition(
             [idleOffset, entryDuration, fadeOut, leaveBudget, depthDecayPerActiveSecond,
-             mediaGrace, previewDuration].allSatisfy { $0.isFinite && $0 >= 0 },
+             mediaGrace, previewDuration, depthGrowthRate].allSatisfy { $0.isFinite && $0 >= 0 },
             "Timing values must be finite and nonnegative"
         )
         self.onset = onset
@@ -38,6 +41,15 @@ public struct NagiTiming: Sendable {
         self.depthDecayPerActiveSecond = depthDecayPerActiveSecond
         self.mediaGrace = mediaGrace
         self.previewDuration = previewDuration
+        self.depthGrowthRate = depthGrowthRate
+    }
+
+    /// The same timing with the two values a user can set (SPEC 2.5).
+    public func with(onset: Double, depthGrowthRate: Double) -> NagiTiming {
+        NagiTiming(onset: min(max(onset, 1), 60), idleOffset: idleOffset, entryDuration: entryDuration,
+                   fadeOut: fadeOut, leaveBudget: leaveBudget, depthDecayPerActiveSecond: depthDecayPerActiveSecond,
+                   mediaGrace: mediaGrace, previewDuration: previewDuration,
+                   depthGrowthRate: depthGrowthRate.isFinite ? max(depthGrowthRate, 0) : 1)
     }
 }
 
@@ -100,7 +112,7 @@ public struct NagiStateMachine: Sendable {
         }
     }
 
-    private let timing: NagiTiming
+    public private(set) var timing: NagiTiming
     private var state: State = .active
     private var depth: Double = 0
     private var updatedAt: Double?
@@ -120,6 +132,13 @@ public struct NagiStateMachine: Sendable {
     private var inputAtEntry: Double?
 
     public init(timing: NagiTiming = NagiTiming()) {
+        self.timing = timing
+    }
+
+    /// New timing from `now` on: time so far runs under the old one, and depth, phase and any
+    /// preview carry over.
+    public mutating func setTiming(_ timing: NagiTiming, at now: Double) {
+        advance(to: now)
         self.timing = timing
     }
 
@@ -272,11 +291,11 @@ public struct NagiStateMachine: Sendable {
         switch state {
         case .entering, .calm:
             if let expiry = previewEndsAt, now >= expiry {
-                depth += expiry - previousTime
+                depth += (expiry - previousTime) * timing.depthGrowthRate
                 leave(at: expiry)
                 decayFrom = expiry
             } else {
-                depth += now - previousTime
+                depth += (now - previousTime) * timing.depthGrowthRate
                 if case let .entering(startedAt) = state, now >= startedAt + timing.entryDuration {
                     state = .calm
                 }

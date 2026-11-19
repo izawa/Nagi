@@ -27,10 +27,15 @@ import QuartzCore
     }
 
     private let measurement: MeasurementOptions
+    /// The highest frame rate asked of every display link; changing it updates the running ones.
+    var frameRateCap: Float {
+        didSet { for overlay in overlays.values { Self.apply(frameRateCap, to: overlay.link) } }
+    }
 
     init(device: any MTLDevice, measurement: MeasurementOptions) {
         self.device = device
         self.measurement = measurement
+        frameRateCap = measurement.maxFrameRate
         rebuild()
     }
 
@@ -116,13 +121,16 @@ import QuartzCore
         }
         let link = CAMetalDisplayLink(metalLayer: layer)
         link.delegate = target
-        let rate = measurement.maxFrameRate
-        link.preferredFrameRateRange = CAFrameRateRange(minimum: min(30, rate), maximum: rate, preferred: rate)
+        Self.apply(frameRateCap, to: link)
         link.isPaused = !isShown
         // .common so frames keep coming while a menu is being tracked.
         link.add(to: .main, forMode: .common)
         if isShown { window.orderFrontRegardless() }
         return Overlay(window: window, layer: layer, link: link, linkTarget: target, view: view)
+    }
+
+    private static func apply(_ rate: Float, to link: CAMetalDisplayLink) {
+        link.preferredFrameRateRange = CAFrameRateRange(minimum: min(30, rate), maximum: rate, preferred: rate)
     }
 
     private static func displayView(_ screen: NSScreen, id: UInt32, drawableScale: Double) -> DisplayView {

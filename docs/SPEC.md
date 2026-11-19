@@ -108,6 +108,8 @@ Dock には出さず、メニューバーのアイコンだけで常駐する。
 - 設定…
 - Nagi を終了
 
+エフェクトがいま何も描かないか、ほとんど描かないときは、メニューの先頭にその理由を 1 行出す(木漏れ日なら日の入り後。2026-11-19、DECISIONS D26)。
+
 ### 2.5 設定ウィンドウ
 
 - 一般: ログイン時に起動、現れるまでの秒数、深まる速さ、全体の強さ、動画再生中の扱い、他アプリの画面共有に写すかどうか
@@ -189,6 +191,7 @@ public protocol Effect: AnyObject {
                 view: DisplayView,
                 encoder: EffectEncoder)
     func releaseResources()                      // 凪でない間に呼ばれうる
+    static func note(_ frame: FrameState) -> LocalizedStringResource?  // いま描かない理由。メニューに出す
 }
 
 public struct EffectDescriptor {

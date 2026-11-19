@@ -37,21 +37,24 @@ import SwiftUI
     }
 
     var body: some Scene {
-        MenuBarExtra(String(localized: "凪", bundle: .module), systemImage: "leaf") {
-            Button(String(localized: "今すぐ見る", bundle: .module)) { delegate.engine?.preview() }
-            if AppDelegate.galleryAllowed {
-                // A debug tool: not translated (DECISIONS D24).
-                Button { delegate.showGallery() } label: { Text(verbatim: "ギャラリー…") }
-            }
-            Divider()
-            Button(String(localized: "凪を終了", bundle: .module)) { NSApplication.shared.terminate(nil) }
+        MenuBarExtra {
+            MenuContent(delegate: delegate)
+        } label: {
+            MenuIcon(store: delegate.settings)
         }
     }
 }
 
 @MainActor final class AppDelegate: NSObject, NSApplicationDelegate {
     private(set) var engine: NagiEngine?
+    /// The user's settings (DECISIONS D26).
+    let settings = SettingsStore(effects: EffectCatalog.all)
+    private(set) lazy var notes = EffectNotes { [weak self] in self?.engine?.notes() ?? [] }
     private var gallery: GalleryWindowController?
+
+    func applicationWillTerminate(_ notification: Notification) {
+        settings.flush()
+    }
 
     /// Debug builds always offer the gallery; Release builds when launched with --debug-gallery.
     static let galleryAllowed: Bool = {
@@ -61,6 +64,42 @@ import SwiftUI
         CommandLine.arguments.contains("--debug-gallery")
         #endif
     }()
+
+    let login = LoginItem()
+
+    /// The settings window (SPEC 2.5).
+    func showSettings() {
+        settingsWindow.show()
+    }
+
+    private lazy var settingsWindow: HoldingWindowController = {
+        let window = HoldingWindowController(
+            reason: "settings", title: { String(localized: "設定", bundle: .module) }, size: NSSize(width: 640, height: 600),
+            engine: { [weak self] in self?.engine }
+        ) { [unowned self] in
+            AnyView(SettingsView(store: settings, login: login, device: engine?.renderer.device))
+        }
+        window.onClose = { [settings] in settings.flush() }
+        return window
+    }()
+
+    /// The first-launch guide; done when it closes, however it closes.
+    private lazy var onboardingWindow: HoldingWindowController = {
+        let window = HoldingWindowController(
+            reason: "onboarding", title: { String(localized: "凪", bundle: .module) }, size: NSSize(width: 480, height: 520),
+            engine: { [weak self] in self?.engine }
+        ) { [unowned self] in
+            AnyView(OnboardingView(store: settings, login: login) { [weak self] in self?.onboardingWindow.close() })
+        }
+        window.onClose = { [settings] in
+            settings.update { $0.onboarded = true }
+            settings.flush()
+        }
+        return window
+    }()
+
+    /// A window holds nagi off, so "see it now" would do nothing.
+    var windowsHoldOff: Bool { settingsWindow.holdsOff || onboardingWindow.holdsOff }
 
     func showGallery() {
         guard let engine else { return }
@@ -90,9 +129,13 @@ import SwiftUI
                 maxFrameRate: Self.value(after: "--debug-max-fps", in: arguments).flatMap(Float.init) ?? 60,
                 eightBit: arguments.contains("--debug-eight-bit"))
             let engine = try NagiEngine(effects: effects, trace: arguments.contains("--trace"), measurement: measurement)
-            if let patch { engine.renderer.parameters[PatchEffect.descriptor.id] = patch }
-            if arguments.contains("--sharing-readonly") { engine.sharingType = .readOnly }
-            if arguments.contains("--debug-ignore-media") { engine.suppressDuringMedia = false }
+            if let patch {
+                engine.renderer.parameters[PatchEffect.descriptor.id] = patch
+                // Calibration output must not depend on the saved strength.
+                settings.overrides.strength = 1
+            }
+            if arguments.contains("--sharing-readonly") { settings.overrides.sharing = .readOnly }
+            if arguments.contains("--debug-ignore-media") { settings.overrides.holdForMedia = false }
             if arguments.contains("--debug-strongest-wind") { engine.weather.strongestWind = true }
             if arguments.contains("--debug-clear-sky") { engine.weather.sky = .clear }
             if arguments.contains("--debug-cloud-pass") { engine.cloudPassEachShowing = true }
@@ -103,10 +146,32 @@ import SwiftUI
                 let parts = arguments[index + 1].split(separator: "=", maxSplits: 1).map(String.init)
                 let path = parts.first?.split(separator: ".", maxSplits: 1).map(String.init) ?? []
                 guard parts.count == 2, path.count == 2 else { continue }
-                engine.renderer.parameters[path[0], default: [:]][path[1]] = ParameterValue(parsing: parts[1])
+                settings.overrides.parameters[path[0], default: [:]][path[1]] = ParameterValue(parsing: parts[1])
             }
-            engine.start()
+            settings.overrides.frameRateCap = Self.value(after: "--debug-max-fps", in: arguments).flatMap(Float.init)
             self.engine = engine
+            // The settings go in before the first sample, so nagi starts with the saved onset and pause.
+            settings.attach(engine)
+            engine.start()
+            settings.didApply = { [weak self] in self?.notes.refresh() }
+            notes.start()
+            // Debug launches (measurements, checks) run unattended: no guide, and it stays unseen.
+            let debugLaunch = arguments.contains { $0.hasPrefix("--debug-") }
+            if !settings.settings.onboarded, !debugLaunch { onboardingWindow.show() }
+            // Low Power Mode switches the frame rate (SPEC 2.2).
+            NotificationCenter.default.addObserver(forName: .NSProcessInfoPowerStateDidChange, object: nil,
+                                                   queue: .main) { [settings] _ in
+                MainActor.assumeIsolated { settings.apply() }
+            }
+            // A timed pause is a wall-clock deadline: check it when the clock jumps or the Mac wakes.
+            NotificationCenter.default.addObserver(forName: .NSSystemClockDidChange, object: nil,
+                                                   queue: .main) { [settings] _ in
+                MainActor.assumeIsolated { settings.recheckPause() }
+            }
+            NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didWakeNotification, object: nil,
+                                                              queue: .main) { [settings] _ in
+                MainActor.assumeIsolated { settings.recheckPause() }
+            }
             if arguments.contains("--debug-stall") { startStalling() }
             if arguments.contains("--debug-preview") {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 1) { engine.preview() }

@@ -82,7 +82,7 @@ import SwiftUI
             let background = try background(for: model.fixture)
             guard let commandBuffer = renderer.queue.makeCommandBuffer() else { return }
             renderer.update(frame)
-            try renderer.encodeScreen(frame, view: view, background: background, into: update.drawable.texture,
+            try renderer.encodeScreen(frame, view: view, strength: model.strength, background: background, into: update.drawable.texture,
                                       commandBuffer: commandBuffer)
             commandBuffer.present(update.drawable)
             commandBuffer.commit()

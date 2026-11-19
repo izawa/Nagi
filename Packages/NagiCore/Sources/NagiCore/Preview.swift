@@ -13,6 +13,8 @@ public struct PreviewScene: Sendable {
     public var seed: UInt64
     public var weather: EnvironmentModel.Weather
     public var appearance: Appearance
+    /// As the desktop does (SPEC 2.2): Reduce Motion halves the wind's clock.
+    public var accessibility = AccessibilityAdjustments()
 
     public init(date: Date, location: GeoLocation? = nil, windTime: Double = 0, seed: UInt64 = 1,
                 weather: EnvironmentModel.Weather = .init(sky: .clear), appearance: Appearance = .light) {
@@ -28,9 +30,9 @@ public struct PreviewScene: Sendable {
     public func frame(elapsed: Double, deltaTime: Double, phase: NagiPhase = .calm, presence: Double = 1,
                       depth: Double) -> FrameState {
         let date = date.addingTimeInterval(elapsed)
-        let time = windTime + elapsed
+        let time = windTime + elapsed * (accessibility.reduceMotion ? 0.5 : 1)
         return FrameState(time: time, deltaTime: deltaTime, date: date, phase: phase, presence: presence,
-                          depth: depth, appearance: appearance, seed: seed,
+                          depth: depth, appearance: appearance, accessibility: accessibility, seed: seed,
                           environment: EnvironmentModel.environment(at: date, location: location, windTime: time,
                                                                     seed: seed, weather: weather))
     }

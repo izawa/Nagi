@@ -22,12 +22,39 @@ import QuartzCore
     public var suppressDuringMedia = true
     /// Paused until this date; `.distantFuture` pauses until resumed.
     public var pausedUntil: Date? {
-        didSet { sample() }
+        didSet { if !configuring { sample() } }
     }
-    /// Held off while the gallery is open, so nagi does not show over it (DECISIONS D24).
-    /// Independent of the user's pause.
-    public var heldOff = false {
-        didSet { sample() }
+    private var configuring = false
+
+    /// Changes several settings with one sample at the end, so nagi never shows under a half-applied
+    /// set (a pause set after the timing, say). The first call can also be the start.
+    public func configure(_ body: (NagiEngine) -> Void) {
+        configuring = true
+        body(self)
+        configuring = false
+        sample()
+    }
+    /// Reasons nagi is held off, e.g. an open gallery or settings preview (DECISIONS D24, D26).
+    /// Independent of the user's pause; nagi shows again when the last one goes.
+    private var holds: Set<String> = []
+    public var heldOff: Bool { !holds.isEmpty }
+
+    public func hold(_ reason: String, _ on: Bool) {
+        if on { holds.insert(reason) } else { holds.remove(reason) }
+        log("hold \(reason) \(on) holds=\(holds.sorted())")
+        if !configuring { sample() }
+    }
+
+    /// The seconds until nagi shows and how fast it deepens, changed while running (SPEC 2.5).
+    public func setTiming(onset: Double, depthGrowthRate: Double) {
+        machine.setTiming(machine.timing.with(onset: onset, depthGrowthRate: depthGrowthRate), at: Self.now)
+        if !configuring { sample() }
+    }
+
+    /// The highest frame rate, changed while running (Low Power Mode, D26).
+    public var frameRateCap: Float {
+        get { overlays.frameRateCap }
+        set { overlays.frameRateCap = newValue }
     }
     public var sharingType: NSWindow.SharingType {
         get { overlays.sharingType }
@@ -106,12 +133,25 @@ import QuartzCore
         sample()
     }
 
+    /// What the effects say about now (Effect.note): after sunset, komorebi shows nothing.
+    public func notes() -> [LocalizedStringResource] {
+        let date = pinnedDate ?? Date()
+        let frame = FrameState(time: Self.now, deltaTime: 0, date: date, phase: .calm, presence: 1, depth: 0,
+                               appearance: Self.appearance, seed: 1, environment: environment(at: date))
+        return renderer.notes(frame)
+    }
+
+    private func environment(at date: Date) -> SharedEnvironment {
+        EnvironmentModel.environment(at: date, location: location ?? EnvironmentModel.defaultLocation(at: date),
+                                     windTime: windClock, seed: 1, weather: weather)
+    }
+
     /// "See it now" (SPEC 2.4, M1-PLAN 4.5).
     public func preview() {
         // Take the reading first, so the click that asked for the preview is not new input.
         sample()
         machine.requestPreview(at: Self.now)
-        log("preview")
+        log("preview holds=\(holds.sorted()) pausedUntil=\(String(describing: pausedUntil)) phase=\(String(describing: output?.phase))")
         sample()
     }
 
@@ -120,7 +160,7 @@ import QuartzCore
     private static var now: Double { ProcessInfo.processInfo.systemUptime }
 
     /// The system's accessibility settings (SPEC 2.2), read each frame.
-    private static var accessibility: AccessibilityAdjustments {
+    public static var accessibility: AccessibilityAdjustments {
         let workspace = NSWorkspace.shared
         return AccessibilityAdjustments(
             reduceMotion: workspace.accessibilityDisplayShouldReduceMotion,
@@ -253,10 +293,7 @@ import QuartzCore
             frame = FrameState(
                 time: now, deltaTime: deltaTime, date: date, phase: output.phase.framePhase,
                 presence: output.presence, depth: shownDepth, appearance: Self.appearance,
-                accessibility: accessibility, seed: 1,
-                environment: EnvironmentModel.environment(
-                    at: date, location: location ?? EnvironmentModel.defaultLocation(at: date),
-                    windTime: windClock, seed: 1, weather: weather))
+                accessibility: accessibility, seed: 1, environment: environment(at: date))
             renderer.update(frame)
             self.frame = frame
         } else {

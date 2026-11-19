@@ -54,6 +54,10 @@ import Observation
     private var dateSetAt = 0.0
     var playing = true
     var framesPerSecond = 60
+    /// The overall strength (the settings preview shows the user's).
+    var strength = 1.0
+    /// The system's accessibility settings (the settings preview follows them; the gallery does not).
+    var accessibility = AccessibilityAdjustments()
     var depth = 60.0
     var deepening = false
     var sky = Sky.clear {
@@ -94,8 +98,9 @@ import Observation
             // After the crossing (28 s), back to the chosen sky.
             if windStart + elapsed - start > 30 { cloudPassAt = nil } else { weather.sky = .cloudPass(start: start) }
         }
-        let scene = PreviewScene(date: date.addingTimeInterval(-dateSetAt), location: inTokyo ? Self.tokyo : nil, windTime: windStart, weather: weather,
+        var scene = PreviewScene(date: date.addingTimeInterval(-dateSetAt), location: inTokyo ? Self.tokyo : nil, windTime: windStart, weather: weather,
                                  appearance: appearance)
+        scene.accessibility = accessibility
         if var running = replay {
             let envelope = running.step(at: elapsed - replayStart, depth: depth)
             replay = running

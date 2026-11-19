@@ -10,25 +10,38 @@ import simd
 /// layer's occlusion is filtered with the sun's image: a disk 0.0093·h/sin θ across, stretched by
 /// 1/sin θ along the azimuth. High layers give soft circles, low leaves sharp shapes. Shallow nagi
 /// shows only the high layer; the lower ones come in as it deepens (SPEC 4.1 深まり方).
+/// A string from this package's catalog (Resources/Localizable.xcstrings), so the app finds the
+/// English (SPEC 3.1).
+func localized(_ key: String.LocalizationValue) -> LocalizedStringResource {
+    LocalizedStringResource(key, bundle: .atURL(Bundle.module.bundleURL))
+}
+
 public final class Komorebi: Effect {
     public static let descriptor = EffectDescriptor(
         id: "komorebi",
-        displayName: "木漏れ日",
-        summary: "梢の隙間から落ちる日の光",
+        displayName: localized("木漏れ日"),
+        summary: localized("梢の隙間から落ちる日の光"),
         layer: .light,
         capabilities: [.extendedRange],
         parameters: [
             ParameterSpec(key: "strength", label: "強さ", kind: .slider(range: 0...1, defaultValue: 1)),
-            ParameterSpec(key: "density", label: "樹冠の密度", kind: .slider(range: 0.3...1.5, defaultValue: 1)),
-            ParameterSpec(key: "wind", label: "風の強さ", kind: .slider(range: 0...1, defaultValue: 0.5)),
+            // Users see density, sway, scale and moonlight, within ranges around the author's look
+            // (DECISIONS D26); the rest are the author's tuning (the gallery, not translated).
+            ParameterSpec(key: "density", label: localized("樹冠の密度"), kind: .slider(range: 0.3...1.5, defaultValue: 1),
+                          user: .slider(0.8...1.2)),
+            ParameterSpec(key: "wind", label: localized("風の強さ"), kind: .slider(range: 0...1, defaultValue: 0.5),
+                          user: .steps([.init(label: localized("弱い"), value: 0), .init(label: localized("ふつう"), value: 0.5),
+                                        .init(label: localized("強い"), value: 1)])),
             // How far a gust drags the canopy downwind, in trunk amplitudes: 2.5 looked real to the
             // author at stop C (DECISIONS D25).
             ParameterSpec(key: "gustLean", label: "突風の引きずり", kind: .slider(range: 0...3, defaultValue: 2.5)),
-            ParameterSpec(key: "scale", label: "スケール", kind: .slider(range: 0.5...2, defaultValue: 1)),
-            ParameterSpec(key: "moonlight", label: "月明かり", kind: .toggle(defaultValue: true)),
-            // The strongest moonlight (a full moon high in a dark sky), as alpha: 0.08, where the
-            // author could see it in both appearances (DECISIONS D21).
-            ParameterSpec(key: "moonAlpha", label: "月明かりの強さ", kind: .slider(range: 0...0.1, defaultValue: 0.08)),
+            ParameterSpec(key: "scale", label: localized("スケール"), kind: .slider(range: 0.5...2, defaultValue: 1),
+                          user: .slider(0.8...1.2)),
+            ParameterSpec(key: "moonlight", label: localized("月明かり"), kind: .toggle(defaultValue: true), user: .toggle),
+            // The strongest moonlight (a full moon high in a dark sky), as alpha: 0.15. At 0.08
+            // (D21) a 68 % moon was too faint to notice; the author chose 0.15 over 0.10 and 0.12
+            // on such a night (D27). To be seen again at the full moon.
+            ParameterSpec(key: "moonAlpha", label: "月明かりの強さ", kind: .slider(range: 0...0.2, defaultValue: 0.15)),
             // Tuned at stop B (M1-PLAN 3): the strongest shadow in light appearance (DECISIONS D3),
             // and the light in dark appearance with its EDR gain cap.
             ParameterSpec(key: "lightAlpha", label: "影の濃さ", kind: .slider(range: 0...0.4, defaultValue: 0.2)),
@@ -104,7 +117,7 @@ public final class Komorebi: Effect {
         let clearSky = light.weight
         let strength = frame.number("strength", default: 1) * (frame.accessibility.reduceStrength ? 0.6 : 1)
         let dark = frame.appearance == .dark
-        let peak = light.isMoon ? Self.clamped(frame.number("moonAlpha", default: 0.08), 0...0.1, default: 0.08)
+        let peak = light.isMoon ? Self.clamped(frame.number("moonAlpha", default: 0.15), 0...0.2, default: 0.15)
             : frame.number(dark ? "darkAlpha" : "lightAlpha", default: 0.2)
         guard clearSky * strength * peak > 0 else { return }
 
@@ -362,6 +375,18 @@ public final class Komorebi: Effect {
     }
 
     // MARK: - Light source
+
+    /// Low sun or after sunset: nothing, or only a faint moonlight (below an alpha of 0.02 it
+    /// cannot be seen). The sun stops lighting the canopy 5° above the horizon, before it sets.
+    public static func note(_ frame: FrameState) -> LocalizedStringResource? {
+        switch lightSource(frame) {
+        case let light? where !light.isMoon: nil
+        case let light? where light.weight * frame.number("moonAlpha", default: 0.15) >= 0.02:
+            localized("日が沈んでいます。木漏れ日は月明かりで薄く現れます")
+        default: frame.environment.sun.altitude > 0
+            ? localized("日が低いので、木漏れ日は現れません") : localized("日が沈んでいるので、木漏れ日は現れません")
+        }
+    }
 
     /// What lights the canopy: the sun by day; at night, if moonlight is on, the moon (DECISIONS
     /// D21), weighted by how dark the sky is (it comes in through civil twilight), how high the

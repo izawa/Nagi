@@ -18,6 +18,15 @@ public protocol Effect: AnyObject {
 
     /// Frees what can be rebuilt. May be called while nagi is not shown.
     func releaseResources()
+
+    /// A short line for the menu when the effect draws nothing or little at `frame`'s time and
+    /// place (komorebi after sunset), so "see it now" showing nothing is not mistaken for a fault.
+    /// Nil when it shows as usual.
+    static func note(_ frame: FrameState) -> LocalizedStringResource?
+}
+
+extension Effect {
+    public static func note(_ frame: FrameState) -> LocalizedStringResource? { nil }
 }
 
 /// What the core lends an effect at creation.

@@ -4,11 +4,12 @@ import PackageDescription
 
 let package = Package(
     name: "KomorebiEffect",
+    defaultLocalization: "ja",
     platforms: [.macOS(.v27)],
     products: [.library(name: "KomorebiEffect", targets: ["KomorebiEffect"])],
     dependencies: [.package(path: "../../NagiKit")],
     targets: [
-        .target(name: "KomorebiEffect", dependencies: ["NagiKit"], resources: [.process("Shaders")]),
+        .target(name: "KomorebiEffect", dependencies: ["NagiKit"], resources: [.process("Shaders"), .process("Resources")]),
         .testTarget(name: "KomorebiEffectTests", dependencies: ["KomorebiEffect"]),
     ]
 )

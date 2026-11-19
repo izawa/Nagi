@@ -24,5 +24,6 @@ let package = Package(
             dependencies: ["NagiKit", "NagiCore", "EffectCatalog", "DebugEffects"],
             resources: [.process("Resources")]
         ),
+        .testTarget(name: "NagiTests", dependencies: ["Nagi", "NagiKit", "EffectCatalog"]),
     ]
 )

@@ -62,14 +62,60 @@ public struct ParameterSpec: Sendable {
         }
     }
 
+    /// How a user sets it in Settings, if at all (SPEC 2.5, DECISIONS D26). Nil keeps it for the
+    /// author's tuning (the gallery). `defaultValue` is the recommendation either way.
+    public enum UserControl: Sendable {
+        /// A slider over a range inside the tuning range.
+        case slider(ClosedRange<Double>)
+        /// Named steps, each a value of the slider.
+        case steps([Step])
+        /// The toggle as declared.
+        case toggle
+    }
+
+    public struct Step: Sendable {
+        public var label: LocalizedStringResource
+        public var value: Double
+        public init(label: LocalizedStringResource, value: Double) {
+            self.label = label
+            self.value = value
+        }
+    }
+
     public var key: String
     public var label: LocalizedStringResource
     public var kind: Kind
+    public var user: UserControl?
 
-    public init(key: String, label: LocalizedStringResource, kind: Kind) {
+    public init(key: String, label: LocalizedStringResource, kind: Kind, user: UserControl? = nil) {
         self.key = key
         self.label = label
         self.kind = kind
+        self.user = user
+    }
+
+    /// `value` made valid for this parameter: the right type, finite, within the range a user
+    /// may set (or the tuning range), and a known choice; otherwise the default.
+    public func validated(_ value: ParameterValue?, forUser: Bool) -> ParameterValue {
+        switch (kind, value) {
+        case let (.slider(range, _), .number(number)?) where number.isFinite:
+            var allowed = range
+            if forUser {
+                switch user {
+                case let .slider(userRange): allowed = userRange
+                case let .steps(steps):
+                    return steps.contains { $0.value == number } ? .number(number) : defaultValue
+                default: break
+                }
+            }
+            return .number(min(max(number, allowed.lowerBound), allowed.upperBound))
+        case (.toggle, .flag?):
+            return value!
+        case let (.choice(options, _), .choice(key)?) where options.contains(where: { $0.key == key }):
+            return .choice(key)
+        default:
+            return defaultValue
+        }
     }
 
     public var defaultValue: ParameterValue {
@@ -81,10 +127,31 @@ public struct ParameterSpec: Sendable {
     }
 }
 
-public enum ParameterValue: Hashable, Sendable {
+public enum ParameterValue: Hashable, Sendable, Codable {
     case number(Double)
     case flag(Bool)
     case choice(String)
+
+    /// Saved as the bare value: a number, true/false, or a string (settings.json, D26).
+    public init(from decoder: any Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        if let flag = try? container.decode(Bool.self) {
+            self = .flag(flag)
+        } else if let number = try? container.decode(Double.self) {
+            self = .number(number)
+        } else {
+            self = .choice(try container.decode(String.self))
+        }
+    }
+
+    public func encode(to encoder: any Encoder) throws {
+        var container = encoder.singleValueContainer()
+        switch self {
+        case let .number(number): try container.encode(number)
+        case let .flag(flag): try container.encode(flag)
+        case let .choice(key): try container.encode(key)
+        }
+    }
 
     /// A value typed on a command line: a number, `true`/`false`, or else a choice key.
     public init(parsing text: String) {

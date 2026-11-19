@@ -187,7 +187,7 @@ struct GalleryView: View {
             window.center()
             self.window = window
             self.preview = preview
-            engine.heldOff = true
+            engine.hold("gallery", true)
             preview.start()
             window.makeKeyAndOrderFront(nil)
             NSApp.activate()
@@ -200,6 +200,6 @@ struct GalleryView: View {
         preview?.stop()
         preview = nil
         window = nil
-        engine?.heldOff = false
+        engine?.hold("gallery", false)
     }
 }
