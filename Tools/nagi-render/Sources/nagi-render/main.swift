@@ -156,6 +156,9 @@ struct Options {
             index += 1
         }
         if cloudPass { weather.sky = .cloudPass(start: time) }
+        // --seed once chose the canopy too: without --param tree it still does, so earlier
+        // commands draw the same tree (the weather follows --seed either way).
+        if parameters["tree"] == nil { parameters["tree"] = .number(Double(seed)) }
     }
 
     func outputURL(for index: Int) -> URL {

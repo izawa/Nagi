@@ -120,6 +120,26 @@
           }
         }
       }
+    },
+    "木の番号": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tree Number"
+          }
+        }
+      }
+    },
+    "植え替える": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Replant"
+          }
+        }
+      }
     }
   },
   "version": "1.0"

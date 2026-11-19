@@ -101,9 +101,9 @@ private struct EffectSection: View {
                 control(spec)
             }
             Button(String(localized: "推奨に戻す", bundle: .module)) {
-                store.update { $0.effects[descriptor.id] = nil }
+                store.update { $0.effects[descriptor.id] = kept($0.effects[descriptor.id]) }
             }
-            .disabled(store.settings.effects[descriptor.id] == nil)
+            .disabled(store.settings.effects[descriptor.id] == kept(store.settings.effects[descriptor.id]))
         } header: {
             Text(descriptor.displayName)
         }
@@ -129,9 +129,30 @@ private struct EffectSection: View {
             Toggle(String(localized: spec.label), isOn: Binding {
                 if case let .flag(flag) = value(spec) { flag } else { false }
             } set: { set(spec, .flag($0)) })
+        case let .wholeNumber(range, skipping, reroll):
+            LabeledContent(String(localized: spec.label)) {
+                HStack {
+                    TextField("", value: number(spec, fallback: Double(range.lowerBound)),
+                              format: .number.precision(.fractionLength(0)))
+                        .frame(width: 56)
+                        .multilineTextAlignment(.trailing)
+                    Button(String(localized: reroll)) {
+                        // Another number offered, never the same one (when there is another).
+                        let offered = range.filter { !skipping.contains($0) && .number(Double($0)) != value(spec) }
+                        if let next = offered.randomElement() { set(spec, .number(Double(next))) }
+                    }
+                }
+            }
         case nil:
             EmptyView()
         }
+    }
+
+    /// What restoring the recommendation leaves: the choices (the tree), not the look.
+    private func kept(_ values: [String: ParameterValue]?) -> [String: ParameterValue]? {
+        let keep = Set(descriptor.parameters.filter { $0.user?.keepsOnReset == true }.map(\.key))
+        let left = values?.filter { keep.contains($0.key) }
+        return left?.isEmpty == false ? left : nil
     }
 
     private func value(_ spec: ParameterSpec) -> ParameterValue {

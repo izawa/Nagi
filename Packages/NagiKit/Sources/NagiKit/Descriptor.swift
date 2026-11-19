@@ -71,6 +71,15 @@ public struct ParameterSpec: Sendable {
         case steps([Step])
         /// The toggle as declared.
         case toggle
+        /// A whole number in a range, typed in, or a different one picked at random by a button
+        /// labelled `reroll` (komorebi's tree). Numbers in `skipping` are never offered. A choice,
+        /// not a look: restoring the recommendation keeps it.
+        case wholeNumber(ClosedRange<Int>, skipping: Set<Int> = [], reroll: LocalizedStringResource)
+
+        /// Kept when the user restores the recommended values.
+        public var keepsOnReset: Bool {
+            if case .wholeNumber = self { true } else { false }
+        }
     }
 
     public struct Step: Sendable {
@@ -105,6 +114,12 @@ public struct ParameterSpec: Sendable {
                 case let .slider(userRange): allowed = userRange
                 case let .steps(steps):
                     return steps.contains { $0.value == number } ? .number(number) : defaultValue
+                case let .wholeNumber(userRange, skipping, _):
+                    let whole = Int(min(max(number.rounded(), Double(userRange.lowerBound)), Double(userRange.upperBound)))
+                    // A skipped number becomes the next one offered (or the one before, at the top).
+                    let offered = (whole...userRange.upperBound).first { !skipping.contains($0) }
+                        ?? (userRange.lowerBound...whole).last { !skipping.contains($0) }
+                    return offered.map { .number(Double($0)) } ?? defaultValue
                 default: break
                 }
             }

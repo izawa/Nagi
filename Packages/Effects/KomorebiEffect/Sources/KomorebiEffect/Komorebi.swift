@@ -38,6 +38,11 @@ public final class Komorebi: Effect {
             ParameterSpec(key: "scale", label: localized("スケール"), kind: .slider(range: 0.5...2, defaultValue: 1),
                           user: .slider(0.8...1.2)),
             ParameterSpec(key: "moonlight", label: localized("月明かり"), kind: .toggle(defaultValue: true), user: .toggle),
+            // Which tree: the canopy's seed (the weather keeps the shared seed). Tree 1 is the one
+            // the author tuned; every tree offered passed the flash check, and the three that
+            // flashed four times in a second are skipped (DECISIONS D28).
+            ParameterSpec(key: "tree", label: localized("木の番号"), kind: .slider(range: 1...255, defaultValue: 1),
+                          user: .wholeNumber(1...255, skipping: [35, 143, 252], reroll: localized("植え替える"))),
             // The strongest moonlight (a full moon high in a dark sky), as alpha: 0.15. At 0.08
             // (D21) a 68 % moon was too faint to notice; the author chose 0.15 over 0.10 and 0.12
             // on such a night, and kept it at the full moon (D27).
@@ -267,6 +272,11 @@ public final class Komorebi: Effect {
 
     static let maxMaskTexels = 4096
 
+    /// The canopy's seed: the tree's number, a whole number from 1.
+    static func tree(_ frame: FrameState) -> UInt64 {
+        UInt64(clamped(frame.number("tree", default: 1), 1...255, default: 1).rounded())
+    }
+
     private func prepare(layer: Int, style: LayerStyle, geometry: LayerGeometry, ground: CGRect, frame: FrameState,
                          spread: Float, display: UInt32) throws -> LayerResources {
         let bounds = geometry.layerBounds(forGround: ground, imageScale: Double(exp2(spread)))
@@ -300,11 +310,12 @@ public final class Komorebi: Effect {
 
         let density = Self.clamped(frame.number("density", default: 1), 0...3, default: 1)
         let scale = Self.clamped(frame.number("scale", default: 1), 0.25...4, default: 1)
+        let tree = Self.tree(frame)
         let cells = Canopy.cellRange(bounds, style: style, scale: scale)
         let leafKey = LeafKey(cells: [cells.x.lowerBound, cells.x.upperBound, cells.y.lowerBound, cells.y.upperBound],
-                              seed: frame.seed, density: density, scale: scale)
+                              seed: tree, density: density, scale: scale)
         if resources.leafKey != leafKey {
-            let leaves = Canopy.leaves(in: bounds, layer: layer, style: style, seed: frame.seed, density: density, scale: scale)
+            let leaves = Canopy.leaves(in: bounds, layer: layer, style: style, seed: tree, density: density, scale: scale)
             resources.leafCount = leaves.count
             resources.leaves = leaves.isEmpty ? nil
                 : leaves.withUnsafeBytes { device.makeBuffer(bytes: $0.baseAddress!, length: $0.count, options: .storageModeShared) }

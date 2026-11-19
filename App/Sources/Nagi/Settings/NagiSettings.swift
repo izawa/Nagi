@@ -33,8 +33,6 @@ struct NagiSettings: Codable, Equatable {
     var holdForMedia = true
     var showInScreenSharing = false
     var lowPower = LowPower.reduceFrameRate
-    /// The tree (canopy seed). Fixed for now; how a release changes it is decided before stage 6.
-    var seed: UInt64 = 1
     /// Per effect, the user's values by parameter key (only user-facing parameters).
     var effects: [String: [String: ParameterValue]] = [:]
 
@@ -57,7 +55,6 @@ struct NagiSettings: Codable, Equatable {
         holdForMedia = value(.holdForMedia, defaults.holdForMedia)
         showInScreenSharing = value(.showInScreenSharing, defaults.showInScreenSharing)
         lowPower = value(.lowPower, defaults.lowPower)
-        seed = value(.seed, defaults.seed)
         // Each value on its own, so one bad value does not lose its neighbours.
         let lenient = value(.effects, [String: LenientRecord]())
         effects = lenient.compactMapValues { $0.values?.compactMapValues(\.value) }
