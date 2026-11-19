@@ -15,8 +15,10 @@ import QuartzCore
     public var location: GeoLocation?
     /// A fixed wall-clock date for the sun (stop B looks at daylight in the evening).
     public var pinnedDate: Date?
-    /// Debug: hold the mean wind at the strongest the model gives, with every gust at full strength.
-    public var strongestWind = false
+    /// The weather hints of the effects, and debug overrides of the sky (EnvironmentModel.Weather).
+    public var weather = EnvironmentModel.Weather()
+    /// Debug: start a cloud crossing the sun each time nagi shows (CloudModel.pass).
+    public var cloudPassEachShowing = false
     public var suppressDuringMedia = true
     /// Paused until this date; `.distantFuture` pauses until resumed.
     public var pausedUntil: Date? {
@@ -58,6 +60,7 @@ import QuartzCore
                 measurement: MeasurementOptions = .init()) throws {
         guard let device = MTLCreateSystemDefaultDevice() else { throw NagiCoreError("no Metal device") }
         renderer = try FrameRenderer(device: device, effects: effects)
+        weather.cloudBias = effects.compactMap { $0.descriptor.weatherHint?.cloudBias }.reduce(0, +)
         overlays = OverlayController(device: device, measurement: measurement)
         self.measurement = measurement
         machine = NagiStateMachine(timing: timing)
@@ -230,13 +233,14 @@ import QuartzCore
             let accessibility = Self.accessibility
             windClock += (now - windClockRead) * (accessibility.reduceMotion ? 0.5 : 1)
             windClockRead = now
+            if cloudPassEachShowing, framesThisShowing == 1 { weather.sky = .cloudPass(start: windClock) }
             frame = FrameState(
                 time: now, deltaTime: deltaTime, date: date, phase: phase(output.phase),
                 presence: output.presence, depth: output.depth, appearance: Self.appearance,
                 accessibility: accessibility, seed: 1,
                 environment: EnvironmentModel.environment(
                     at: date, location: location ?? EnvironmentModel.defaultLocation(at: date),
-                    windTime: windClock, seed: 1, strongest: strongestWind))
+                    windTime: windClock, seed: 1, weather: weather))
             renderer.update(frame)
             self.frame = frame
         } else {

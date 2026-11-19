@@ -281,6 +281,7 @@ struct CompositeUniforms {
     float4 display;   // desktop origin.xy (millimetres), points per pixel, millimetres per point
     float4 output;    // alpha at full effect, clear-sky weight g, dark appearance (0/1), exposure
     float4 colour;    // straight (unpremultiplied) linear Display P3 colour of the output; w: shadow curve
+    float4 sky;       // sun occlusion 0…1, output size in pixels (x, y), unused
     MaskUniforms layers[4];
 };
 
@@ -293,14 +294,10 @@ static float3 layerTransmission(texture2d<float> filtered, sampler s, MaskUnifor
     return mix(float3(1.0), t, weight);
 }
 
-fragment float4 komorebiComposite(FullscreenOut in [[stage_in]],
-                                  texture2d<float> crownHigh [[texture(0)]],
-                                  texture2d<float> crownLow [[texture(1)]],
-                                  texture2d<float> middle [[texture(2)]],
-                                  texture2d<float> low [[texture(3)]],
-                                  sampler s [[sampler(0)]],
-                                  constant CompositeUniforms &u [[buffer(0)]]) {
-    float2 ground = u.display.xy + in.position.xy * u.display.z * u.display.w;
+// The output alpha under a clear sky at one pixel of the display.
+static float clearAlpha(texture2d<float> crownHigh, texture2d<float> crownLow, texture2d<float> middle,
+                        texture2d<float> low, sampler s, constant CompositeUniforms &u, float2 pixel) {
+    float2 ground = u.display.xy + pixel * u.display.z * u.display.w;
     // The two crowns are one canopy with gaps at two heights: light comes through either.
     float3 high = layerTransmission(crownHigh, s, u.layers[0], ground);
     float3 lowCrown = layerTransmission(crownLow, s, u.layers[1], ground);
@@ -320,9 +317,50 @@ fragment float4 komorebiComposite(FullscreenOut in [[stage_in]],
     // so it still fades where t rounds to 1.
     float x = max(0.0, dot(transmission, float3(0.2126, 0.7152, 0.0722))) * u.output.w;
     float t = 1.0 - exp(-x);
-    float g = u.output.y;
     // Light appearance: the shade, lifted in the middle by the curve (< 1 darkens the half-shade).
     float shade = exp(-x * max(u.colour.w, 0.05));
-    float alpha = u.output.x * g * (u.output.z > 0.5 ? t : shade);
+    return u.output.x * u.output.y * (u.output.z > 0.5 ? t : shade);
+}
+
+// The mean clear alpha over the display, from a 128 × 72 grid (DECISIONS D20): the level the
+// komorebi melts to when a cloud hides the sun. One threadgroup of 256 threads.
+constant uint meanGrid = 128, meanRows = 72, meanThreads = 256;
+
+kernel void komorebiMean(texture2d<float> crownHigh [[texture(0)]],
+                         texture2d<float> crownLow [[texture(1)]],
+                         texture2d<float> middle [[texture(2)]],
+                         texture2d<float> low [[texture(3)]],
+                         sampler s [[sampler(0)]],
+                         constant CompositeUniforms &u [[buffer(0)]],
+                         device float &mean [[buffer(1)]],
+                         uint lane [[thread_index_in_threadgroup]]) {
+    threadgroup float sums[meanThreads];
+    float sum = 0;
+    for (uint k = lane; k < meanGrid * meanRows; k += meanThreads) {
+        float2 cell = float2(k % meanGrid, k / meanGrid) + 0.5;
+        sum += clearAlpha(crownHigh, crownLow, middle, low, s, u, cell / float2(meanGrid, meanRows) * u.sky.yz);
+    }
+    sums[lane] = sum;
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+    for (uint stride = meanThreads / 2; stride > 0; stride /= 2) {
+        if (lane < stride) sums[lane] += sums[lane + stride];
+        threadgroup_barrier(mem_flags::mem_threadgroup);
+    }
+    if (lane == 0) mean = sums[0] / float(meanGrid * meanRows);
+}
+
+// Under a cloud the direct sun goes and only the light from the whole sky comes through the
+// canopy: the pattern melts towards the display's mean, so the page keeps its overall tone
+// (DECISIONS D20).
+fragment float4 komorebiComposite(FullscreenOut in [[stage_in]],
+                                  texture2d<float> crownHigh [[texture(0)]],
+                                  texture2d<float> crownLow [[texture(1)]],
+                                  texture2d<float> middle [[texture(2)]],
+                                  texture2d<float> low [[texture(3)]],
+                                  sampler s [[sampler(0)]],
+                                  constant CompositeUniforms &u [[buffer(0)]],
+                                  constant float &mean [[buffer(1)]]) {
+    float alpha = u.sky.x >= 1 ? mean : clearAlpha(crownHigh, crownLow, middle, low, s, u, in.position.xy);
+    if (u.sky.x > 0 && u.sky.x < 1) alpha = mix(alpha, mean, u.sky.x);
     return float4(u.colour.rgb * alpha, alpha);
 }

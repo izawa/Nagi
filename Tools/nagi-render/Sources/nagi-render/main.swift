@@ -39,13 +39,17 @@ import NagiKit
     let view = DisplayView(id: 1, pixelSize: options.size, scale: 2, frameInDesktop: CGRect(origin: .zero, size: points),
                            physicalSize: options.physicalSize, edrHeadroom: 1, potentialEDRHeadroom: 1)
     let location = options.location ?? EnvironmentModel.defaultLocation(at: options.date)
+    // The same weather hints the live engine mixes in (NagiEngine).
+    var weather = options.weather
+    weather.cloudBias = types.compactMap { $0.descriptor.weatherHint?.cloudBias }.reduce(0, +)
     let deltaTime = options.frames == 1 ? 1.0 / 60 : 1.0 / options.fps
     for index in 0..<options.frames {
         try autoreleasepool {
             let elapsed = Double(index) / options.fps
             let time = options.time + elapsed
             let date = options.date.addingTimeInterval(elapsed)
-            let environment = EnvironmentModel.environment(at: date, location: location, windTime: time, seed: options.seed)
+            let environment = EnvironmentModel.environment(at: date, location: location, windTime: time, seed: options.seed,
+                                                           weather: weather)
             let frame = FrameState(time: time, deltaTime: deltaTime, date: date, phase: .calm,
                                    presence: options.presence, depth: options.depth, appearance: options.appearance,
                                    seed: options.seed, environment: environment)
@@ -67,6 +71,9 @@ struct Options {
     var date = Date()
     var time = 0.0
     var frames = 1
+    /// Clear by default, so a comparison does not depend on the weather.
+    var weather = EnvironmentModel.Weather(sky: .clear)
+    private var cloudPass = false
     var fps = 30.0
     var depth = 60.0
     var presence = 1.0
@@ -100,6 +107,13 @@ struct Options {
             case "--fps":
                 fps = try number(value())
                 guard fps > 0 else { throw usage() }
+            case "--sky":
+                switch try value() {
+                case "clear": weather.sky = .clear; cloudPass = false
+                case "natural": weather.sky = .natural; cloudPass = false
+                case "pass": cloudPass = true
+                default: throw usage()
+                }
             case "--depth": depth = try number(value())
             case "--presence": presence = try unit(value())
             case "--strength": strength = try unit(value())
@@ -136,6 +150,7 @@ struct Options {
             }
             index += 1
         }
+        if cloudPass { weather.sky = .cloudPass(start: time) }
     }
 
     func outputURL(for index: Int) -> URL {
@@ -181,8 +196,10 @@ func usage() -> NagiCoreError {
     NagiCoreError("""
     usage: nagi-render <effect[,effect…]> [--at ISO8601] [--time s] [--frames N] [--fps F] [--depth s] [--presence 0…1] \
     [--strength 0…1] [--appearance light|dark] [--seed n] [--background gray:<0…1>|<image>] \
-    [--size WxH] [--physical-mm WxH] [--location lat,lon] [--param key=value]… [--debug-alpha] [--output file.png]
+    [--size WxH] [--physical-mm WxH] [--location lat,lon] [--sky clear|natural|pass] [--param key=value]… \
+    [--debug-alpha] [--output file.png]
     --frames defaults to 1. Sequences default to 30 fps and write file-0000.png, file-0001.png, …
+    --sky defaults to clear; pass is one cloud crossing the sun, starting at --time.
     """)
 }
 

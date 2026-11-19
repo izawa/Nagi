@@ -80,8 +80,11 @@ public struct SharedEnvironment: Sendable {
     public var moonPhase = 0.0
     /// Correlated colour temperature of direct sunlight, kelvin.
     public var sunColorTemperature = 5500.0
-    /// 0 clear … 1 overcast.
+    /// 0 clear … 1 overcast: how cloudy the sky is, changing over minutes.
     public var cloudCover = 0.0
+    /// 0 … 1: how much of the direct sun a cloud takes away now. Effects lose their direct light,
+    /// not their brightness: the light that remains comes from the whole sky (DECISIONS D20).
+    public var sunOcclusion = 0.0
     public var wind = Wind()
     public init() {}
 }

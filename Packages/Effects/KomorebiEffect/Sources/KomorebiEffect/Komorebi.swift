@@ -50,6 +50,9 @@ public final class Komorebi: Effect {
     private let leafPipeline: any MTLRenderPipelineState
     private let gapPipeline: any MTLRenderPipelineState
     private let compositePipeline: any MTLRenderPipelineState
+    private let meanPipeline: any MTLComputePipelineState
+    /// Each display's mean clear alpha (one float), written by `komorebiMean` on the GPU.
+    private var means: [UInt32: any MTLBuffer] = [:]
     private let filter: SunImageFilter
     private let sampler: any MTLSamplerState
     private let white: any MTLTexture
@@ -66,6 +69,8 @@ public final class Komorebi: Effect {
         composite.colorAttachments[0].pixelFormat = context.pixelFormat
         composite.colorAttachments[0].usePremultipliedSourceOver()
         compositePipeline = try device.makeRenderPipelineState(descriptor: composite)
+        guard let mean = library.makeFunction(name: "komorebiMean") else { throw KomorebiError("no komorebiMean") }
+        meanPipeline = try device.makeComputePipelineState(function: mean)
         filter = try SunImageFilter(device: device, library: library)
         let samplerDescriptor = MTLSamplerDescriptor()
         samplerDescriptor.minFilter = .linear
@@ -89,7 +94,8 @@ public final class Komorebi: Effect {
     public func render(_ frame: FrameState, view: DisplayView, encoder: any EffectEncoder) throws {
         let sun = frame.environment.sun
         guard sun.altitude > Self.cutoffAltitude else { return }
-        let clearSky = smoothstep(Self.cutoffAltitude, Self.fadeAltitude, sun.altitude) * (1 - frame.environment.cloudCover)
+        // Clouds do not fade the effect: they melt it towards its mean (the composite, DECISIONS D20).
+        let clearSky = smoothstep(Self.cutoffAltitude, Self.fadeAltitude, sun.altitude)
         let strength = frame.number("strength", default: 1) * (frame.accessibility.reduceStrength ? 0.6 : 1)
         guard clearSky * strength > 0 else { return }
 
@@ -133,18 +139,43 @@ public final class Komorebi: Effect {
             output: SIMD4(Float(frame.number(dark ? "darkAlpha" : "lightAlpha", default: 0.2) * strength),
                           Float(clearSky), dark ? 1 : 0, Float(Self.clamped(frame.number("exposure", default: 12), 1...40, default: 12))),
             colour: SIMD4(colour, Float(frame.number("shadowCurve", default: 0.7))),
+            sky: SIMD4(Float(min(max(frame.environment.sunOcclusion, 0), 1)), Float(view.pixelSize.x),
+                       Float(view.pixelSize.y), 0),
             layers: (masks[0], masks[1], masks[2], masks[3]))
+        let mean = try meanBuffer(display: view.id)
+        if composite.sky.x > 0 {
+            encoder.compute { compute in
+                compute.setComputePipelineState(meanPipeline)
+                for (index, texture) in textures.enumerated() { compute.setTexture(texture, index: index) }
+                compute.setSamplerState(sampler, index: 0)
+                compute.setBytes(&composite, length: MemoryLayout<CompositeUniforms>.stride, index: 0)
+                compute.setBuffer(mean, offset: 0, index: 1)
+                compute.dispatchThreadgroups(MTLSize(width: 1, height: 1, depth: 1),
+                                             threadsPerThreadgroup: MTLSize(width: 256, height: 1, depth: 1))
+            }
+        }
         encoder.renderToOutput { pass in
             pass.setRenderPipelineState(compositePipeline)
             for (index, texture) in textures.enumerated() { pass.setFragmentTexture(texture, index: index) }
             pass.setFragmentSamplerState(sampler, index: 0)
             pass.setFragmentBytes(&composite, length: MemoryLayout<CompositeUniforms>.stride, index: 0)
+            pass.setFragmentBuffer(mean, offset: 0, index: 1)
             pass.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
         }
     }
 
+    private func meanBuffer(display: UInt32) throws -> any MTLBuffer {
+        if let buffer = means[display] { return buffer }
+        guard let buffer = device.makeBuffer(length: MemoryLayout<Float>.stride, options: .storageModePrivate) else {
+            throw KomorebiError("could not make the mean buffer")
+        }
+        means[display] = buffer
+        return buffer
+    }
+
     public func releaseResources() {
         layers.removeAll()
+        means.removeAll()
     }
 
     /// How much each layer (the two crowns, middle, low) shows at a given depth (SPEC 4.1 深まり方).
@@ -412,6 +443,7 @@ struct CompositeUniforms {
     var display: SIMD4<Float>
     var output: SIMD4<Float>
     var colour: SIMD4<Float>
+    var sky: SIMD4<Float>
     var layers: (MaskUniforms, MaskUniforms, MaskUniforms, MaskUniforms)
 }
 

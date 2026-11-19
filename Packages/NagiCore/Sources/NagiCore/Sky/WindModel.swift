@@ -18,18 +18,11 @@ public enum WindModel {
     /// across the widest desktop expected (±3 m at `Wind.frontSpeed`).
     static let gustReach = 3000 / Wind.frontSpeed
 
-    /// The wind clock is kept to ±10⁹ s (32 years), so its knot and interval indices fit an `Int`.
-    static let timeLimit = 1e9
-
     public static func wind(at time: Double, seed: UInt64) -> Wind {
-        let time = time.isFinite ? min(max(time, -timeLimit), timeLimit) : 0
-        let prevailing = unit(seed, stream: 0, index: 0) * 2 * .pi
-        let knot = time / knotSpacing
-        let index = Int(knot.rounded(.down))
-        let blend = smooth(knot - Double(index))
+        let time = Knots.clamped(time)
+        let prevailing = Knots.unit(seed, stream: 0, index: 0) * 2 * .pi
         func mix(_ stream: UInt64, _ low: Double, _ high: Double) -> Double {
-            let a = unit(seed, stream: stream, index: index), b = unit(seed, stream: stream, index: index + 1)
-            return low + (high - low) * (a + (b - a) * blend)
+            Knots.value(at: time, spacing: knotSpacing, seed: seed, stream: stream, low, high)
         }
         // A light breeze to moderate wind (never so calm the canopy stands still: the author found
         // the calm end too still), wandering ±35° around the prevailing direction.
@@ -66,14 +59,7 @@ public enum WindModel {
         return strong
     }
 
-    static func smooth(_ x: Double) -> Double { x * x * (3 - 2 * x) }
-
-    /// A uniform value in [0, 1) for a seed, a stream and an index (SplitMix64 finaliser).
     static func unit(_ seed: UInt64, stream: UInt64, index: Int) -> Double {
-        var z = seed &+ stream &* 0x9E37_79B9_7F4A_7C15 &+ UInt64(bitPattern: Int64(index)) &* 0xD1B5_4A32_D192_ED03
-        z = (z ^ (z >> 30)) &* 0xBF58_476D_1CE4_E5B9
-        z = (z ^ (z >> 27)) &* 0x94D0_49BB_1331_11EB
-        z ^= z >> 31
-        return Double(z >> 11) / Double(1 << 53)
+        Knots.unit(seed, stream: stream, index: index)
     }
 }
