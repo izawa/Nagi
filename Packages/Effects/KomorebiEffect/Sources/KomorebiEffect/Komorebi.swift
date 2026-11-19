@@ -40,7 +40,7 @@ public final class Komorebi: Effect {
             ParameterSpec(key: "moonlight", label: localized("月明かり"), kind: .toggle(defaultValue: true), user: .toggle),
             // The strongest moonlight (a full moon high in a dark sky), as alpha: 0.15. At 0.08
             // (D21) a 68 % moon was too faint to notice; the author chose 0.15 over 0.10 and 0.12
-            // on such a night (D27). To be seen again at the full moon.
+            // on such a night, and kept it at the full moon (D27).
             ParameterSpec(key: "moonAlpha", label: "月明かりの強さ", kind: .slider(range: 0...0.2, defaultValue: 0.15)),
             // Tuned at stop B (M1-PLAN 3): the strongest shadow in light appearance (DECISIONS D3),
             // and the light in dark appearance with its EDR gain cap.
