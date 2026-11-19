@@ -113,6 +113,7 @@ public final class Komorebi: Effect {
                             height: view.frameInDesktop.height * millimetresPerPoint)
         let weights = Self.layerWeights(depth: frame.depth)
         let wind = Self.windUniforms(frame)
+        let swayGains = Self.swayGains(depth: frame.depth)
         let spread = Float(Self.clamped(frame.number("blurSpread", default: 0.6), 0...1.5, default: 0.6))
         var masks: [MaskUniforms] = []
         var textures: [any MTLTexture] = []
@@ -127,7 +128,7 @@ public final class Komorebi: Effect {
                                          sun: sun, ground: ground, imageScale: Double(exp2(spread)))
             let resources = try prepare(layer: index, style: style, geometry: geometry, ground: ground, frame: frame,
                                         spread: spread, display: view.id)
-            encodeMask(resources, style: style, sway: wind.with(style.sway), encoder: encoder)
+            encodeMask(resources, style: style, sway: wind.with(style.sway, gains: swayGains), encoder: encoder)
             var uniforms = resources.uniforms
             uniforms.strideOffset.w = Float(weights[index])
             masks.append(uniforms)
@@ -188,9 +189,18 @@ public final class Komorebi: Effect {
     }
 
     /// How much each layer (the two crowns, middle, low) shows at a given depth (SPEC 4.1 深まり方).
-    /// Both crowns always show: a crown left out would read as open sky in the `max`.
+    /// Both crowns always show: a crown left out would read as open sky in the `max`. The leaves
+    /// wait until 20 s, so the first seconds leave text alone (SPEC 2.1); the sharpest come last
+    /// (DECISIONS D22).
     static func layerWeights(depth: Double) -> [Double] {
-        [1, 1, smoothstep(10, 25, depth), smoothstep(20, 40, depth)]
+        [1, 1, smoothstep(20, 40, depth), smoothstep(30, 50, depth)]
+    }
+
+    /// How much of the wind's swing shows at a given depth: the trunk at half and the branches
+    /// at a quarter until 20 s, both in full by 50 s (DECISIONS D22).
+    static func swayGains(depth: Double) -> (trunk: Double, branch: Double) {
+        let deepening = smoothstep(20, 50, depth)
+        return (0.5 + 0.5 * deepening, 0.25 + 0.75 * deepening)
     }
 
     // MARK: - Per layer
@@ -450,11 +460,13 @@ struct SwayUniforms {
     var gusts = (SIMD4<Float>.zero, SIMD4<Float>.zero, SIMD4<Float>.zero, SIMD4<Float>.zero,
                  SIMD4<Float>.zero, SIMD4<Float>.zero, SIMD4<Float>.zero, SIMD4<Float>.zero)
 
-    /// The same wind with a layer's amplitudes.
-    func with(_ sway: LayerStyle.Sway) -> SwayUniforms {
+    /// The same wind with a layer's amplitudes, scaled by depth (trunk; branch, its turn and the
+    /// leaves' flutter).
+    func with(_ sway: LayerStyle.Sway, gains: (trunk: Double, branch: Double)) -> SwayUniforms {
         var copy = self
-        copy.amplitude = SIMD4(Float(sway.trunk), Float(sway.branch), Float(sway.branchTurn * .pi / 180),
-                               Float(sway.flutter * .pi / 180))
+        copy.amplitude = SIMD4(Float(sway.trunk * gains.trunk), Float(sway.branch * gains.branch),
+                               Float(sway.branchTurn * gains.branch * .pi / 180),
+                               Float(sway.flutter * gains.branch * .pi / 180))
         return copy
     }
 }

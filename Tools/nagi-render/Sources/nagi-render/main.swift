@@ -51,7 +51,8 @@ import NagiKit
             let environment = EnvironmentModel.environment(at: date, location: location, windTime: time, seed: options.seed,
                                                            weather: weather)
             let frame = FrameState(time: time, deltaTime: deltaTime, date: date, phase: .calm,
-                                   presence: options.presence, depth: options.depth, appearance: options.appearance,
+                                   presence: options.presence, depth: max(0, options.depth + options.depthRate * elapsed),
+                                   appearance: options.appearance,
                                    seed: options.seed, environment: environment)
             let output = options.outputURL(for: index)
             if options.debugAlpha {
@@ -71,6 +72,8 @@ struct Options {
     var date = Date()
     var time = 0.0
     var frames = 1
+    /// Depth gained per second of a sequence (1 = deepening in real time).
+    var depthRate = 0.0
     /// Clear by default, so a comparison does not depend on the weather.
     var weather = EnvironmentModel.Weather(sky: .clear)
     private var cloudPass = false
@@ -115,6 +118,7 @@ struct Options {
                 default: throw usage()
                 }
             case "--depth": depth = try number(value())
+            case "--depth-rate": depthRate = try number(value())
             case "--presence": presence = try unit(value())
             case "--strength": strength = try unit(value())
             case "--appearance":
@@ -194,7 +198,7 @@ func pair<T: SIMDScalar>(_ text: String, _ parse: (String) -> T?) throws -> SIMD
 
 func usage() -> NagiCoreError {
     NagiCoreError("""
-    usage: nagi-render <effect[,effect…]> [--at ISO8601] [--time s] [--frames N] [--fps F] [--depth s] [--presence 0…1] \
+    usage: nagi-render <effect[,effect…]> [--at ISO8601] [--time s] [--frames N] [--fps F] [--depth s] [--depth-rate r] [--presence 0…1] \
     [--strength 0…1] [--appearance light|dark] [--seed n] [--background gray:<0…1>|<image>] \
     [--size WxH] [--physical-mm WxH] [--location lat,lon] [--sky clear|natural|pass] [--param key=value]… \
     [--debug-alpha] [--output file.png]

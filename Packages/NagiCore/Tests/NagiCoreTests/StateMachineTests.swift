@@ -54,14 +54,14 @@ import Testing
     #expect(repeatedInput.phase == .leaving)
     #expect(repeatedInput.leaveDeadline == deadline)
     #expect(abs(repeatedInput.presence - 0.4375) < 1e-10)
-    #expect(abs(repeatedInput.depth - 1) < 1e-10)
+    #expect(abs(repeatedInput.depth - 1.75) < 1e-10)  // 0.05 s of moving at 5 per second
 
     let goneAt = 2.4
     let active = machine.step(.init(now: goneAt, idleReading: 0.8))
     #expect(goneAt < deadline)
     #expect(active.phase == .active)
     #expect(active.presence == 0)
-    #expect(active.depth == 0)
+    #expect(abs(active.depth) < 1e-10)
     #expect(!active.showsOverlay)
     #expect(active.leaveDeadline == nil)
 }
@@ -83,13 +83,19 @@ import Testing
     #expect(smallTrueIdleDrop.presence == 1)
 }
 
-@Test func activeDepthKeepsDecayingAfterDeparture() {
+/// Depth falls while the hands move and for a second after, not while they rest before nagi
+/// shows again (DECISIONS D22): a short scroll does not start the stillness over.
+@Test func depthFallsOnlyWhileTheHandsMove() {
     var machine = NagiStateMachine(timing: NagiTiming(idleOffset: 0.9))
     _ = machine.step(.init(now: 0, idleReading: 3.9))
     #expect(machine.step(.init(now: 20, idleReading: 0.9)).depth == 20)
-    #expect(machine.step(.init(now: 20.5, idleReading: 0.9)).depth == 10)
-    #expect(machine.step(.init(now: 20.75, idleReading: 0.9)).depth == 5)
-    #expect(machine.step(.init(now: 21.5, idleReading: 0.9)).depth == 0)
+    #expect(machine.step(.init(now: 20.5, idleReading: 0.9)).depth == 17.5)
+    // Resting 3 s after the last input: only the first second of it counts.
+    #expect(machine.step(.init(now: 23.5, idleReading: 3.9)).depth == 12.5)
+    // nagi showed again at 23.5 with the depth it kept, and it grows from there.
+    let back = machine.step(.init(now: 24, idleReading: 4.4))
+    #expect(back.depth == 13)
+    #expect(back.phase == .entering)
 }
 
 @Test func mediaSuppressesThroughGraceAndCanInterruptEntry() {
@@ -175,3 +181,24 @@ import Testing
     #expect(machine.step(.init(now: 6.5, idleReading: 1.4)).phase == .active)
     #expect(machine.step(.init(now: 6.6, idleReading: 1.5)).phase == .entering)
 }
+
+/// Samples are sparse while nagi is hidden: a single key after a long rest must not count the
+/// rest as movement, while steady typing across samples counts throughout (Codex's review).
+@Test func sparseSamplesCountOnlyTheMoving() {
+    var machine = NagiStateMachine(timing: NagiTiming(idleOffset: 0.9))
+    _ = machine.step(.init(now: 0, idleReading: 3.9))
+    _ = machine.step(.init(now: 100, idleReading: 103.9))   // calm, depth 100
+    #expect(machine.step(.init(now: 100.2, idleReading: 0.9)).phase == .leaving)  // a key
+    // Hidden and resting; the next sample a while later, a single key just before it.
+    let late = machine.step(.init(now: 130, idleReading: 0.95))
+    // depth 100.2, less the key at 100.2 (its second) and the key at 129.95 (0.05 s), at 5 per s.
+    #expect(abs(late.depth - (100.2 - 1.05 * 5)) < 1e-9)
+    // Typing steadily, sampled every 3 s: each interval counts in full.
+    let typing1 = machine.step(.init(now: 133, idleReading: 0.9))
+    let typing2 = machine.step(.init(now: 136, idleReading: 0.9))
+    #expect(abs((typing1.depth - typing2.depth) - 15) < 1e-9)
+    // A wake a little late (timer slack) is still steady typing.
+    let typing3 = machine.step(.init(now: 139.2, idleReading: 0.9))
+    #expect(abs((typing2.depth - typing3.depth) - 16) < 1e-9)
+}
+

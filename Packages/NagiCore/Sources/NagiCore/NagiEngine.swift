@@ -44,6 +44,9 @@ import QuartzCore
     /// without jumping when it is switched.
     private var windClock = ProcessInfo.processInfo.systemUptime
     private var windClockRead = ProcessInfo.processInfo.systemUptime
+    /// The depth effects see: held while nagi leaves, so the fading picture does not change as
+    /// depth falls (a falling sway gain would slide the canopy back, DECISIONS D22).
+    private var shownDepth = 0.0
     /// Set when the watchdog or the guard took nagi down: it stays down until the state
     /// machine has gone back to active, so a fade cannot bring it back.
     private var forcedDown = false
@@ -234,9 +237,11 @@ import QuartzCore
             windClock += (now - windClockRead) * (accessibility.reduceMotion ? 0.5 : 1)
             windClockRead = now
             if cloudPassEachShowing, framesThisShowing == 1 { weather.sky = .cloudPass(start: windClock) }
+            // A new showing starts from the current depth even if its first frame is already leaving.
+            if output.phase != .leaving || framesThisShowing == 1 { shownDepth = output.depth }
             frame = FrameState(
                 time: now, deltaTime: deltaTime, date: date, phase: phase(output.phase),
-                presence: output.presence, depth: output.depth, appearance: Self.appearance,
+                presence: output.presence, depth: shownDepth, appearance: Self.appearance,
                 accessibility: accessibility, seed: 1,
                 environment: EnvironmentModel.environment(
                     at: date, location: location ?? EnvironmentModel.defaultLocation(at: date),
