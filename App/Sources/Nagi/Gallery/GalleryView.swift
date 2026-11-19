@@ -169,8 +169,9 @@ struct GalleryView: View {
 
     func show() {
         if let window {
-            window.makeKeyAndOrderFront(nil)
             NSApp.activate()
+            window.makeKeyAndOrderFront(nil)
+            window.orderFrontRegardless()
             return
         }
         guard let engine, let effect = EffectCatalog.all.first else { return }
@@ -189,8 +190,9 @@ struct GalleryView: View {
             self.preview = preview
             engine.hold("gallery", true)
             preview.start()
-            window.makeKeyAndOrderFront(nil)
             NSApp.activate()
+            window.makeKeyAndOrderFront(nil)
+            window.orderFrontRegardless()
         } catch {
             NSLog("Gallery could not open: %@", error.localizedDescription)
         }

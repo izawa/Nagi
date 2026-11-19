@@ -35,11 +35,14 @@ import Observation
         var strength: Double?
     }
 
-    init(effects: [any Effect.Type], url: URL = SettingsStore.defaultURL) {
+    /// `fresh` starts from the defaults as on a first launch (the saved file is replaced at the
+    /// first change); for checking the first-launch guide.
+    init(effects: [any Effect.Type], url: URL = SettingsStore.defaultURL, fresh: Bool = false) {
         self.effects = effects
         self.url = url
+        // Even when fresh, a file Nagi cannot read is kept aside first.
         let loaded = Self.load(from: url, effects: effects)
-        settings = loaded.settings
+        settings = fresh ? NagiSettings() : loaded.settings
         mustNotWrite = !loaded.writable
     }
 

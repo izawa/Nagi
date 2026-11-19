@@ -40,8 +40,11 @@ import SwiftUI
             self.window = window
         }
         holdsOff = true
-        window?.makeKeyAndOrderFront(nil)
+        // A menu-bar app is not active when its menu is used: activate first, then bring the
+        // window up even if the activation is declined, so it never opens behind other apps.
         NSApp.activate()
+        window?.makeKeyAndOrderFront(nil)
+        window?.orderFrontRegardless()
     }
 
     func close() {

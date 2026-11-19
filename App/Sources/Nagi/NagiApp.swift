@@ -25,6 +25,8 @@ import SwiftUI
 /// - `--debug-strongest-wind`: hold the mean wind at its strongest, every gust at full strength.
 /// - `--debug-clear-sky`: no clouds. `--debug-cloud-pass`: each time nagi shows, one cloud crosses
 ///   the sun (clear 3 s, covering 10 s, hidden 5 s, clearing 10 s, then clear).
+/// - `--first-launch`: start from the default settings and show the first-launch guide, as on a
+///   new Mac (the saved settings are replaced at the first change).
 /// - `--debug-preview`: "see it now" one second after launch (checks without waiting for onset).
 /// - `--debug-gallery`: offer the gallery in the menu (always offered in Debug builds).
 /// - `--debug-fake-input s`: the idle reading behaves as if input came every `s` seconds,
@@ -48,7 +50,7 @@ import SwiftUI
 @MainActor final class AppDelegate: NSObject, NSApplicationDelegate {
     private(set) var engine: NagiEngine?
     /// The user's settings (DECISIONS D26).
-    let settings = SettingsStore(effects: EffectCatalog.all)
+    let settings = SettingsStore(effects: EffectCatalog.all, fresh: CommandLine.arguments.contains("--first-launch"))
     private(set) lazy var notes = EffectNotes { [weak self] in self?.engine?.notes() ?? [] }
     private var gallery: GalleryWindowController?
 
