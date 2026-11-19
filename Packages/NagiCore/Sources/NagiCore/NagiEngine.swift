@@ -240,7 +240,7 @@ import QuartzCore
             // A new showing starts from the current depth even if its first frame is already leaving.
             if output.phase != .leaving || framesThisShowing == 1 { shownDepth = output.depth }
             frame = FrameState(
-                time: now, deltaTime: deltaTime, date: date, phase: phase(output.phase),
+                time: now, deltaTime: deltaTime, date: date, phase: output.phase.framePhase,
                 presence: output.presence, depth: shownDepth, appearance: Self.appearance,
                 accessibility: accessibility, seed: 1,
                 environment: EnvironmentModel.environment(
@@ -251,7 +251,7 @@ import QuartzCore
         } else {
             var latest = self.frame!
             latest.presence = output.presence
-            latest.phase = phase(output.phase)
+            latest.phase = output.phase.framePhase
             frame = latest
         }
         guard let commandBuffer = renderer.queue.makeCommandBuffer() else { return }
@@ -280,14 +280,6 @@ import QuartzCore
             if framesThisShowing % 300 == 0, let summary = gpuTimes.drain() { log("gpu \(summary)") }
         }
         commandBuffer.commit()
-    }
-
-    private func phase(_ phase: NagiStatePhase) -> NagiPhase {
-        switch phase {
-        case .entering: .entering
-        case .leaving: .leaving
-        case .active, .calm: .calm
-        }
     }
 
     private static var appearance: Appearance {
@@ -339,5 +331,16 @@ final class GPUTimes: @unchecked Sendable {
         let mean = sorted.reduce(0, +) / Double(sorted.count)
         let p95 = sorted[min(sorted.count - 1, Int(Double(sorted.count) * 0.95))]
         return String(format: "n=%d mean=%.2f p95=%.2f max=%.2f ms", sorted.count, mean, p95, max)
+    }
+}
+
+extension NagiStatePhase {
+    /// The phase effects see (they are not drawn while active). The engine and nagi-render use it.
+    public var framePhase: NagiPhase {
+        switch self {
+        case .entering: .entering
+        case .leaving: .leaving
+        case .active, .calm: .calm
+        }
     }
 }

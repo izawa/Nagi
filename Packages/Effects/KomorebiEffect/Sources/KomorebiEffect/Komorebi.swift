@@ -149,7 +149,7 @@ public final class Komorebi: Effect {
             output: SIMD4(Float(peak * strength),
                           Float(clearSky), dark ? 1 : 0, Float(Self.clamped(frame.number("exposure", default: 12), 1...40, default: 12))),
             colour: SIMD4(colour, Float(frame.number("shadowCurve", default: 0.7))),
-            sky: SIMD4(Float(min(max(frame.environment.sunOcclusion, 0), 1)), Float(view.pixelSize.x),
+            sky: SIMD4(Float(Self.occlusion(frame)), Float(view.pixelSize.x),
                        Float(view.pixelSize.y), 0),
             layers: (masks[0], masks[1], masks[2], masks[3]))
         let mean = try meanBuffer(display: view.id)
@@ -347,6 +347,15 @@ public final class Komorebi: Effect {
             descriptor.colorAttachments[0].destinationAlphaBlendFactor = .one
         }
         return try device.makeRenderPipelineState(descriptor: descriptor)
+    }
+
+    /// How far the pattern melts towards its mean (DECISIONS D20, D23): the cloud's occlusion, and
+    /// on entry and exit the part presence has not reached yet, so nagi comes and goes as a cloud
+    /// clears or covers the sun. Calm is exactly the cloud's.
+    static func occlusion(_ frame: FrameState) -> Double {
+        let cloud = min(max(frame.environment.sunOcclusion, 0), 1)
+        let contrast = frame.phase == .calm ? 1 : min(max(frame.presence, 0), 1)
+        return cloud + (1 - cloud) * (1 - contrast)
     }
 
     // MARK: - Light source

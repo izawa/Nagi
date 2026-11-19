@@ -43,6 +43,9 @@ import NagiKit
     var weather = options.weather
     weather.cloudBias = types.compactMap { $0.descriptor.weatherHint?.cloudBias }.reduce(0, +)
     let deltaTime = options.frames == 1 ? 1.0 / 60 : 1.0 / options.fps
+    var machine = NagiStateMachine()
+    var previousElapsed = -Double.infinity
+    var shownDepth = options.depth
     for index in 0..<options.frames {
         try autoreleasepool {
             let elapsed = Double(index) / options.fps
@@ -50,8 +53,21 @@ import NagiKit
             let date = options.date.addingTimeInterval(elapsed)
             let environment = EnvironmentModel.environment(at: date, location: location, windTime: time, seed: options.seed,
                                                            weather: weather)
-            let frame = FrameState(time: time, deltaTime: deltaTime, date: date, phase: .calm,
-                                   presence: options.presence, depth: max(0, options.depth + options.depthRate * elapsed),
+            // Entry and exit through the state machine: the hands have rested for the onset at the
+            // start, and move once at --input-at (stepped at that moment, whatever the frame rate).
+            let envelope = options.inputAt.map { inputAt in
+                func inputs(_ now: Double) -> NagiInputs {
+                    NagiInputs(now: now, idleReading: now < inputAt ? NagiTiming().onset + now : now - inputAt)
+                }
+                if previousElapsed < inputAt, elapsed > inputAt { _ = machine.step(inputs(inputAt)) }
+                return machine.step(inputs(elapsed))
+            }
+            previousElapsed = elapsed
+            // Depth is held while nagi leaves, as the engine does (DECISIONS D22).
+            if envelope?.phase != .leaving { shownDepth = max(0, options.depth + options.depthRate * elapsed) }
+            let frame = FrameState(time: time, deltaTime: deltaTime, date: date,
+                                   phase: envelope?.phase.framePhase ?? .calm,
+                                   presence: envelope?.presence ?? options.presence, depth: shownDepth,
                                    appearance: options.appearance,
                                    seed: options.seed, environment: environment)
             let output = options.outputURL(for: index)
@@ -74,6 +90,9 @@ struct Options {
     var frames = 1
     /// Depth gained per second of a sequence (1 = deepening in real time).
     var depthRate = 0.0
+    /// With a sequence: the hands stop at its start (nagi enters through the real state machine)
+    /// and move once at this many seconds (nagi leaves). Nil keeps the fixed calm frame.
+    var inputAt: Double?
     /// Clear by default, so a comparison does not depend on the weather.
     var weather = EnvironmentModel.Weather(sky: .clear)
     private var cloudPass = false
@@ -119,6 +138,7 @@ struct Options {
                 }
             case "--depth": depth = try number(value())
             case "--depth-rate": depthRate = try number(value())
+            case "--input-at": inputAt = try number(value())
             case "--presence": presence = try unit(value())
             case "--strength": strength = try unit(value())
             case "--appearance":
@@ -198,7 +218,7 @@ func pair<T: SIMDScalar>(_ text: String, _ parse: (String) -> T?) throws -> SIMD
 
 func usage() -> NagiCoreError {
     NagiCoreError("""
-    usage: nagi-render <effect[,effect…]> [--at ISO8601] [--time s] [--frames N] [--fps F] [--depth s] [--depth-rate r] [--presence 0…1] \
+    usage: nagi-render <effect[,effect…]> [--at ISO8601] [--time s] [--frames N] [--fps F] [--depth s] [--depth-rate r] [--input-at s] [--presence 0…1] \
     [--strength 0…1] [--appearance light|dark] [--seed n] [--background gray:<0…1>|<image>] \
     [--size WxH] [--physical-mm WxH] [--location lat,lon] [--sky clear|natural|pass] [--param key=value]… \
     [--debug-alpha] [--output file.png]
