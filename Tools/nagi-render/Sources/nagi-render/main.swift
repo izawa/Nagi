@@ -106,8 +106,7 @@ struct Options {
             case "--param":
                 let parts = try value().split(separator: "=", maxSplits: 1).map(String.init)
                 guard parts.count == 2 else { throw usage() }
-                parameters[parts[0]] = Double(parts[1]).map { .number($0) }
-                    ?? (["true", "false"].contains(parts[1]) ? .flag(parts[1] == "true") : .choice(parts[1]))
+                parameters[parts[0]] = ParameterValue(parsing: parts[1])
             case "--output": output = URL(fileURLWithPath: try value())
             case "--debug-alpha":
                 debugAlpha = true

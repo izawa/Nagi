@@ -6,7 +6,7 @@ import simd
 
 /// Komorebi, sunlight through leaves (SPEC 4.1).
 ///
-/// Two crowns (6 m and 3 m) and two leaf layers (1.8 m and 0.5 m). Each gap is a pinhole that images the sun's disk, so a
+/// Two crowns (3 m and 1.5 m) and two leaf layers (0.9 m and 0.25 m). Each gap is a pinhole that images the sun's disk, so a
 /// layer's occlusion is filtered with the sun's image: a disk 0.0093·h/sin θ across, stretched by
 /// 1/sin θ along the azimuth. High layers give soft circles, low leaves sharp shapes. Shallow nagi
 /// shows only the high layer; the lower ones come in as it deepens (SPEC 4.1 深まり方).
@@ -32,8 +32,9 @@ public final class Komorebi: Effect {
             ParameterSpec(key: "heightScale", label: "木の高さ", kind: .slider(range: 0.3...1.5, defaultValue: 1)),
             // Below 1 darkens the half-shade between sun and shadow (light appearance, stop B).
             ParameterSpec(key: "shadowCurve", label: "影の階調", kind: .slider(range: 0.3...1.5, defaultValue: 0.7)),
-            // How bright a sun disk looks to an eye adapted to the shade (stop B).
-            ParameterSpec(key: "exposure", label: "木漏れ日の明るさ", kind: .slider(range: 1...40, defaultValue: 16)),
+            // How bright a sun disk looks to an eye adapted to the shade: t = 1 − exp(−exposure·T),
+            // a soft shoulder, so overlapping disks stay brighter (2026-11-19, replaces stop B's clip at 16).
+            ParameterSpec(key: "exposure", label: "木漏れ日の明るさ", kind: .slider(range: 1...40, defaultValue: 12)),
             // How much the sun's image (and an edge's blur) varies over a layer, as leaf heights do.
             ParameterSpec(key: "blurSpread", label: "ぼけの揺らぎ", kind: .slider(range: 0...1.5, defaultValue: 0.6)),
         ]
@@ -147,7 +148,7 @@ public final class Komorebi: Effect {
         var composite = CompositeUniforms(
             display: SIMD4(Float(origin.x), Float(origin.y), Float(1 / view.scale), Float(millimetresPerPoint)),
             output: SIMD4(Float(frame.number(dark ? "darkAlpha" : "lightAlpha", default: 0.2) * strength),
-                          Float(clearSky), dark ? 1 : 0, Float(frame.number("exposure", default: 16))),
+                          Float(clearSky), dark ? 1 : 0, Float(Self.clamped(frame.number("exposure", default: 12), 1...40, default: 12))),
             colour: SIMD4(colour, Float(frame.number("shadowCurve", default: 0.7))),
             layers: (masks[0], masks[1], masks[2], masks[3]))
         encoder.renderToOutput { pass in

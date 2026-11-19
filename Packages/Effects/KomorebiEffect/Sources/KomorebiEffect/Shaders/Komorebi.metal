@@ -193,10 +193,14 @@ fragment float4 komorebiComposite(FullscreenOut in [[stage_in]],
                         * layerTransmission(low, s, u.layers[3], ground);
     // Direct sunlight reaching this point, relative to an open sky, then exposed for the eye
     // adapted to the shade: a sun disk from a small gap carries only a few per cent of full sun.
-    float t = min(1.0, dot(transmission, float3(0.2126, 0.7152, 0.0722)) * u.output.w);
+    // A soft shoulder instead of a clip, so overlapping disks stay brighter than single ones:
+    // t = 1 − e^(−x). The light appearance's shade (1 − t)^curve is e^(−x·curve), computed directly
+    // so it still fades where t rounds to 1.
+    float x = max(0.0, dot(transmission, float3(0.2126, 0.7152, 0.0722))) * u.output.w;
+    float t = 1.0 - exp(-x);
     float g = u.output.y;
     // Light appearance: the shade, lifted in the middle by the curve (< 1 darkens the half-shade).
-    float shade = pow(1.0 - t, max(u.colour.w, 0.05));
+    float shade = exp(-x * max(u.colour.w, 0.05));
     float alpha = u.output.x * g * (u.output.z > 0.5 ? t : shade);
     return float4(u.colour.rgb * alpha, alpha);
 }

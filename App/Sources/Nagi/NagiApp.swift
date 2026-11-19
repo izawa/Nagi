@@ -75,8 +75,8 @@ import SwiftUI
             for (index, argument) in arguments.enumerated() where argument == "--effect-param" && index + 1 < arguments.count {
                 let parts = arguments[index + 1].split(separator: "=", maxSplits: 1).map(String.init)
                 let path = parts.first?.split(separator: ".", maxSplits: 1).map(String.init) ?? []
-                guard parts.count == 2, path.count == 2, let value = Double(parts[1]) else { continue }
-                engine.renderer.parameters[path[0], default: [:]][path[1]] = .number(value)
+                guard parts.count == 2, path.count == 2 else { continue }
+                engine.renderer.parameters[path[0], default: [:]][path[1]] = ParameterValue(parsing: parts[1])
             }
             engine.start()
             self.engine = engine

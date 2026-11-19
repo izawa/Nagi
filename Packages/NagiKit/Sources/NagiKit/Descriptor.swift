@@ -85,6 +85,17 @@ public enum ParameterValue: Hashable, Sendable {
     case number(Double)
     case flag(Bool)
     case choice(String)
+
+    /// A value typed on a command line: a number, `true`/`false`, or else a choice key.
+    public init(parsing text: String) {
+        if let number = Double(text) {
+            self = .number(number)
+        } else if text == "true" || text == "false" {
+            self = .flag(text == "true")
+        } else {
+            self = .choice(text)
+        }
+    }
 }
 
 /// The weather an effect would like (SPEC 3.6): rain leans towards overcast.
