@@ -24,6 +24,11 @@ import QuartzCore
     public var pausedUntil: Date? {
         didSet { sample() }
     }
+    /// Held off while the gallery is open, so nagi does not show over it (DECISIONS D24).
+    /// Independent of the user's pause.
+    public var heldOff = false {
+        didSet { sample() }
+    }
     public var sharingType: NSWindow.SharingType {
         get { overlays.sharingType }
         set { overlays.sharingType = newValue }
@@ -128,7 +133,7 @@ import QuartzCore
             mediaActive = SystemSignals.mediaActive()
             mediaCheckedAt = now
         }
-        let paused = pausedUntil.map { $0 > Date() } ?? false
+        let paused = heldOff || (pausedUntil.map { $0 > Date() } ?? false)
         let inputs = NagiInputs(now: now, idleReading: SystemSignals.idleReading(), paused: paused,
                                 screenUnavailable: signals.screenUnavailable, mediaActive: mediaActive,
                                 suppressDuringMedia: suppressDuringMedia)
@@ -184,7 +189,8 @@ import QuartzCore
         } else if inputs.screenUnavailable {
             return  // the screen-state notification wakes us
         } else if inputs.paused {
-            guard let until = pausedUntil, until != .distantFuture else { return }  // resume wakes us
+            // Releasing the gallery's hold, or resuming, samples again.
+            guard !heldOff, let until = pausedUntil, until != .distantFuture else { return }
             interval = until.timeIntervalSinceNow
         } else if let wake = output.nextWake, wake > now {
             interval = wake - now

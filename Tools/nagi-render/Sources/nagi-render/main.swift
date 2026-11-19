@@ -35,41 +35,22 @@ import NagiKit
     let renderer = try FrameRenderer(device: device, effects: types)
     renderer.parameters = Dictionary(uniqueKeysWithValues: types.map { ($0.descriptor.id, options.parameters) })
 
-    let points = CGSize(width: Double(options.size.x) / 2, height: Double(options.size.y) / 2)
-    let view = DisplayView(id: 1, pixelSize: options.size, scale: 2, frameInDesktop: CGRect(origin: .zero, size: points),
-                           physicalSize: options.physicalSize, edrHeadroom: 1, potentialEDRHeadroom: 1)
-    let location = options.location ?? EnvironmentModel.defaultLocation(at: options.date)
+    let view = PreviewScene.display(pixels: options.size, physicalSize: options.physicalSize)
     // The same weather hints the live engine mixes in (NagiEngine).
     var weather = options.weather
     weather.cloudBias = types.compactMap { $0.descriptor.weatherHint?.cloudBias }.reduce(0, +)
+    let scene = PreviewScene(date: options.date, location: options.location, windTime: options.time, seed: options.seed,
+                             weather: weather, appearance: options.appearance)
     let deltaTime = options.frames == 1 ? 1.0 / 60 : 1.0 / options.fps
-    var machine = NagiStateMachine()
-    var previousElapsed = -Double.infinity
-    var shownDepth = options.depth
+    var replay = options.inputAt.map { EnvelopeReplay(inputAt: $0) }
     for index in 0..<options.frames {
         try autoreleasepool {
             let elapsed = Double(index) / options.fps
-            let time = options.time + elapsed
-            let date = options.date.addingTimeInterval(elapsed)
-            let environment = EnvironmentModel.environment(at: date, location: location, windTime: time, seed: options.seed,
-                                                           weather: weather)
-            // Entry and exit through the state machine: the hands have rested for the onset at the
-            // start, and move once at --input-at (stepped at that moment, whatever the frame rate).
-            let envelope = options.inputAt.map { inputAt in
-                func inputs(_ now: Double) -> NagiInputs {
-                    NagiInputs(now: now, idleReading: now < inputAt ? NagiTiming().onset + now : now - inputAt)
-                }
-                if previousElapsed < inputAt, elapsed > inputAt { _ = machine.step(inputs(inputAt)) }
-                return machine.step(inputs(elapsed))
-            }
-            previousElapsed = elapsed
-            // Depth is held while nagi leaves, as the engine does (DECISIONS D22).
-            if envelope?.phase != .leaving { shownDepth = max(0, options.depth + options.depthRate * elapsed) }
-            let frame = FrameState(time: time, deltaTime: deltaTime, date: date,
-                                   phase: envelope?.phase.framePhase ?? .calm,
-                                   presence: envelope?.presence ?? options.presence, depth: shownDepth,
-                                   appearance: options.appearance,
-                                   seed: options.seed, environment: environment)
+            let depth = max(0, options.depth + options.depthRate * elapsed)
+            // Entry and exit through the state machine when --input-at is given; else a calm frame.
+            let envelope = replay?.step(at: elapsed, depth: depth)
+            let frame = scene.frame(elapsed: elapsed, deltaTime: deltaTime, phase: envelope?.phase.framePhase ?? .calm,
+                                    presence: envelope?.presence ?? options.presence, depth: envelope?.depth ?? depth)
             let output = options.outputURL(for: index)
             if options.debugAlpha {
                 // Stretch each frame's alpha so its peak is white.

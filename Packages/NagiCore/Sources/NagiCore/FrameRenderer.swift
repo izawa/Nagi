@@ -20,6 +20,8 @@ import NagiKit
     public var parameters: [String: [String: ParameterValue]] = [:]
     private var accumulation: [UInt32: any MTLTexture] = [:]
     private var backdropScratch: [UInt32: any MTLTexture] = [:]
+    /// The overlay of a preview, before it is put over the background (DECISIONS D24).
+    private var previewOverlay: [UInt32: any MTLTexture] = [:]
 
     public init(device: any MTLDevice, effects types: [any Effect.Type]) throws {
         guard let queue = device.makeCommandQueue() else { throw NagiCoreError("no command queue") }
@@ -80,16 +82,32 @@ import NagiKit
                          commandBuffer: commandBuffer)
     }
 
+    /// What the screen would show: this frame's overlay over `background` (encoded Display P3,
+    /// composited as WindowServer does), into `target`. nagi-render and the gallery both use it.
+    /// Call `update` first.
+    public func encodeScreen(_ frame: FrameState, view: DisplayView, strength: Double = 1,
+                             background: any MTLTexture, into target: any MTLTexture,
+                             commandBuffer: any MTLCommandBuffer) throws {
+        let overlay = try texture(&previewOverlay, for: view)
+        var view = view
+        if view.backdrop == nil { view.backdrop = background }
+        // The live path applies presence in `encode`; the blend must not apply it again.
+        try encode(frame, view: view, strength: strength, into: overlay, commandBuffer: commandBuffer)
+        encodeDesktopBlend(background: background, overlay: overlay, into: target, commandBuffer: commandBuffer)
+    }
+
     /// Frees one display's textures (the display went away).
     public func forget(display: UInt32) {
         accumulation[display] = nil
         backdropScratch[display] = nil
+        previewOverlay[display] = nil
     }
 
     /// Frees per-display textures and lets the effects free theirs (while nagi is not shown).
     public func releaseResources() {
         accumulation.removeAll()
         backdropScratch.removeAll()
+        previewOverlay.removeAll()
         for effect in effects { effect.instance.releaseResources() }
     }
 

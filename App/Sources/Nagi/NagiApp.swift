@@ -26,6 +26,7 @@ import SwiftUI
 /// - `--debug-clear-sky`: no clouds. `--debug-cloud-pass`: each time nagi shows, one cloud crosses
 ///   the sun (clear 3 s, covering 10 s, hidden 5 s, clearing 10 s, then clear).
 /// - `--debug-preview`: "see it now" one second after launch (checks without waiting for onset).
+/// - `--debug-gallery`: offer the gallery in the menu (always offered in Debug builds).
 /// - `--debug-fake-input s`: the idle reading behaves as if input came every `s` seconds,
 ///   0.5 s after each stall would start (logged as "fakeinput" with the scheduled time).
 @main struct NagiApp: App {
@@ -38,6 +39,10 @@ import SwiftUI
     var body: some Scene {
         MenuBarExtra(String(localized: "凪", bundle: .module), systemImage: "leaf") {
             Button(String(localized: "今すぐ見る", bundle: .module)) { delegate.engine?.preview() }
+            if AppDelegate.galleryAllowed {
+                // A debug tool: not translated (DECISIONS D24).
+                Button { delegate.showGallery() } label: { Text(verbatim: "ギャラリー…") }
+            }
             Divider()
             Button(String(localized: "凪を終了", bundle: .module)) { NSApplication.shared.terminate(nil) }
         }
@@ -46,6 +51,22 @@ import SwiftUI
 
 @MainActor final class AppDelegate: NSObject, NSApplicationDelegate {
     private(set) var engine: NagiEngine?
+    private var gallery: GalleryWindowController?
+
+    /// Debug builds always offer the gallery; Release builds when launched with --debug-gallery.
+    static let galleryAllowed: Bool = {
+        #if DEBUG
+        true
+        #else
+        CommandLine.arguments.contains("--debug-gallery")
+        #endif
+    }()
+
+    func showGallery() {
+        guard let engine else { return }
+        if gallery == nil { gallery = GalleryWindowController(engine: engine) }
+        gallery?.show()
+    }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         let arguments = CommandLine.arguments

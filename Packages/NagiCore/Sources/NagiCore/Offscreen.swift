@@ -12,16 +12,11 @@ import UniformTypeIdentifiers
     public func renderOffscreen(_ frame: FrameState, view: DisplayView, strength: Double = 1,
                                 background: Background) throws -> any MTLTexture {
         let size = view.pixelSize
-        let overlay = try makeTexture(size: size)
         let base = try background.makeTexture(size: size, renderer: self)
         let screen = try makeTexture(size: size, storage: .shared)
         guard let commandBuffer = queue.makeCommandBuffer() else { throw NagiCoreError("no command buffer") }
         update(frame)
-        var view = view
-        if view.backdrop == nil { view.backdrop = base }
-        // The live path applies presence in `encode`; the blend below must not apply it again.
-        try encode(frame, view: view, strength: strength, into: overlay, commandBuffer: commandBuffer)
-        encodeDesktopBlend(background: base, overlay: overlay, into: screen, commandBuffer: commandBuffer)
+        try encodeScreen(frame, view: view, strength: strength, background: base, into: screen, commandBuffer: commandBuffer)
         commandBuffer.commit()
         commandBuffer.waitUntilCompleted()
         if let error = commandBuffer.error { throw error }

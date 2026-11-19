@@ -149,16 +149,17 @@ private final class OverlayWindow: NSWindow {
 
 /// The display link's delegate; forwards to the controller on the main thread.
 /// Immutable, and `forward` only runs on the main actor, hence `@unchecked Sendable`.
-final class LinkTarget: NSObject, CAMetalDisplayLinkDelegate, @unchecked Sendable {
+/// The gallery uses it too.
+public final class LinkTarget: NSObject, CAMetalDisplayLinkDelegate, @unchecked Sendable {
     let display: UInt32
     let forward: @MainActor (UInt32, CAMetalDisplayLink.Update) -> Void
 
-    init(display: UInt32, forward: @escaping @MainActor (UInt32, CAMetalDisplayLink.Update) -> Void) {
+    public init(display: UInt32, forward: @escaping @MainActor (UInt32, CAMetalDisplayLink.Update) -> Void) {
         self.display = display
         self.forward = forward
     }
 
-    nonisolated func metalDisplayLink(_ link: CAMetalDisplayLink, needsUpdate update: CAMetalDisplayLink.Update) {
+    public nonisolated func metalDisplayLink(_ link: CAMetalDisplayLink, needsUpdate update: CAMetalDisplayLink.Update) {
         // The link runs on the main run loop, so this is the main thread.
         nonisolated(unsafe) let update = update
         MainActor.assumeIsolated { forward(display, update) }
