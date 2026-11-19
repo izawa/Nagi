@@ -1,5 +1,5 @@
-// nagi-render: renders effects off screen and writes what the screen would show as a PNG
-// (SPEC 3.12). The implementer looks at the image and fixes the effect.
+// nagi-render: renders effects off screen to a PNG or a numbered PNG sequence (SPEC 3.12).
+// --time starts the animation and wind clocks; --frames and --fps step them together.
 //
 //   nagi-render komorebi --at 2026-06-21T12:00:00+09:00 --depth 35 --presence 1 --appearance light \
 //     --seed 42 --background gray:0.9 --size 1600x1000 --physical-mm 400x250 --output noon.png
@@ -39,24 +39,35 @@ import NagiKit
     let view = DisplayView(id: 1, pixelSize: options.size, scale: 2, frameInDesktop: CGRect(origin: .zero, size: points),
                            physicalSize: options.physicalSize, edrHeadroom: 1, potentialEDRHeadroom: 1)
     let location = options.location ?? EnvironmentModel.defaultLocation(at: options.date)
-    let frame = FrameState(time: options.time, deltaTime: 1.0 / 60, date: options.date, phase: .calm,
-                           presence: options.presence, depth: options.depth, appearance: options.appearance,
-                           seed: options.seed, environment: EnvironmentModel.environment(at: options.date, location: location))
-    if options.debugAlpha {
-        // The overlay's alpha alone, stretched so its largest value is white: shows the pattern
-        // that is only a few per cent strong on screen.
-        let overlay = try renderer.renderOverlay(frame, view: view, strength: options.strength)
-        try writeAlpha(TextureReader.pixels(of: overlay), size: options.size, to: options.output)
-    } else {
-        let screen = try renderer.renderOffscreen(frame, view: view, strength: options.strength, background: options.background)
-        try TextureReader.writePNG(screen, to: options.output)
+    let deltaTime = options.frames == 1 ? 1.0 / 60 : 1.0 / options.fps
+    for index in 0..<options.frames {
+        try autoreleasepool {
+            let elapsed = Double(index) / options.fps
+            let time = options.time + elapsed
+            let date = options.date.addingTimeInterval(elapsed)
+            let environment = EnvironmentModel.environment(at: date, location: location, windTime: time, seed: options.seed)
+            let frame = FrameState(time: time, deltaTime: deltaTime, date: date, phase: .calm,
+                                   presence: options.presence, depth: options.depth, appearance: options.appearance,
+                                   seed: options.seed, environment: environment)
+            let output = options.outputURL(for: index)
+            if options.debugAlpha {
+                // Stretch each frame's alpha so its peak is white.
+                let overlay = try renderer.renderOverlay(frame, view: view, strength: options.strength)
+                try writeAlpha(TextureReader.pixels(of: overlay), size: options.size, to: output)
+            } else {
+                let screen = try renderer.renderOffscreen(frame, view: view, strength: options.strength, background: options.background)
+                try TextureReader.writePNG(screen, to: output)
+            }
+            print(output.path)
+        }
     }
-    print(options.output.path)
 }
 
 struct Options {
     var date = Date()
     var time = 0.0
+    var frames = 1
+    var fps = 30.0
     var depth = 60.0
     var presence = 1.0
     var strength = 1.0
@@ -83,6 +94,12 @@ struct Options {
                 guard let parsed = ISO8601DateFormatter().date(from: try value()) else { throw usage() }
                 date = parsed
             case "--time": time = try number(value())
+            case "--frames":
+                guard let count = Int(try value()), count > 0 else { throw usage() }
+                frames = count
+            case "--fps":
+                fps = try number(value())
+                guard fps > 0 else { throw usage() }
             case "--depth": depth = try number(value())
             case "--presence": presence = try unit(value())
             case "--strength": strength = try unit(value())
@@ -120,6 +137,12 @@ struct Options {
             index += 1
         }
     }
+
+    func outputURL(for index: Int) -> URL {
+        guard frames > 1 else { return output }
+        let base = output.pathExtension.lowercased() == "png" ? output.deletingPathExtension() : output
+        return URL(fileURLWithPath: base.path + String(format: "-%04ld.png", index))
+    }
 }
 
 func writeAlpha(_ pixels: [SIMD4<Float>], size: SIMD2<Int>, to url: URL) throws {
@@ -156,9 +179,10 @@ func pair<T: SIMDScalar>(_ text: String, _ parse: (String) -> T?) throws -> SIMD
 
 func usage() -> NagiCoreError {
     NagiCoreError("""
-    usage: nagi-render <effect[,effect…]> [--at ISO8601] [--time s] [--depth s] [--presence 0…1] \
+    usage: nagi-render <effect[,effect…]> [--at ISO8601] [--time s] [--frames N] [--fps F] [--depth s] [--presence 0…1] \
     [--strength 0…1] [--appearance light|dark] [--seed n] [--background gray:<0…1>|<image>] \
     [--size WxH] [--physical-mm WxH] [--location lat,lon] [--param key=value]… [--debug-alpha] [--output file.png]
+    --frames defaults to 1. Sequences default to 30 fps and write file-0000.png, file-0001.png, …
     """)
 }
 

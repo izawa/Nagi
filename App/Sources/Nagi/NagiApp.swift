@@ -22,6 +22,7 @@ import SwiftUI
 /// - `--debug-date ISO8601`: compute the sun for this wall-clock date (stop B in the evening).
 /// - `--effect-param id.key=value` (repeatable): set an effect parameter, e.g. komorebi.lightAlpha=0.06.
 /// - `--debug-ignore-media`: do not hold back for video or meetings (measurements).
+/// - `--debug-strongest-wind`: hold the mean wind at its strongest, every gust at full strength.
 /// - `--debug-preview`: "see it now" one second after launch (checks without waiting for onset).
 /// - `--debug-fake-input s`: the idle reading behaves as if input came every `s` seconds,
 ///   0.5 s after each stall would start (logged as "fakeinput" with the scheduled time).
@@ -69,6 +70,7 @@ import SwiftUI
             if let patch { engine.renderer.parameters[PatchEffect.descriptor.id] = patch }
             if arguments.contains("--sharing-readonly") { engine.sharingType = .readOnly }
             if arguments.contains("--debug-ignore-media") { engine.suppressDuringMedia = false }
+            if arguments.contains("--debug-strongest-wind") { engine.strongestWind = true }
             if let date = Self.value(after: "--debug-date", in: arguments).flatMap(ISO8601DateFormatter().date(from:)) {
                 engine.pinnedDate = date
             }

@@ -9,6 +9,9 @@ struct Leaf: Equatable {
     var angle: Float
     /// Light let through, per channel (leaves pass a little green).
     var transmission: SIMD3<Float>
+    /// Where the leaf's branch is attached, layer millimetres: a cluster's tip, a twig's first gap,
+    /// or the opening itself. The wind sways and turns the leaf about it (DECISIONS D19).
+    var anchor: SIMD2<Float> = .zero
 }
 
 /// How one canopy layer grows (SPEC 4.1: high gaps make soft circles, low leaves sharp shapes).
@@ -39,6 +42,23 @@ struct LayerStyle {
     var splitSeparation = 0.0...0.0         // between the two openings' centres, millimetres
     static let splitTurn = 25.0 * .pi / 180 // the pair's axis, off the twig's heading
     static let splitShare = 0.3...0.5       // the smaller opening's share of the area
+    /// How far the wind moves this layer at full strength (DECISIONS D19).
+    var sway = Sway()
+
+    /// Peak wind response at full strength: trunk and branch translations in millimetres, the
+    /// branch's turn about its anchor and the leaf's flutter about its centre in degrees.
+    struct Sway {
+        var trunk = 0.0
+        var branch = 0.0
+        var branchTurn = 0.0
+        var flutter = 0.0
+    }
+
+    /// The farthest a leaf can move: the mean wind and a full gust each give up to the trunk and
+    /// branch amplitudes, and a turn swings a twig's far end.
+    var swayReach: Double {
+        2 * (sway.trunk + sway.branch) * 1.5 + sway.branchTurn * .pi / 180 * (chainReach + 1.5 * clusterRadius)
+    }
 
     /// How far a twig reaches from its first gap, plus how far a split opening's centre can move
     /// (at most the separation, which is at least the two openings' half-lengths).
@@ -67,16 +87,20 @@ struct LayerStyle {
         LayerStyle(kind: .gaps, height: 3, baseStride: 2.4, clustersPerCell: 12, leavesPerCluster: 1,
                    clusterRadius: 0, leafLength: 16...30,
                    chainsPerCell: 4, chainLinks: 3...5, chainSpacing: 32...44,
-                   splitChance: 0.55, splitSeparation: 15...22),
+                   splitChance: 0.55, splitSeparation: 15...22,
+                   sway: Sway(trunk: 72, branch: 32, branchTurn: 6)),
         LayerStyle(kind: .gaps, height: 1.5, baseStride: 1.2, clustersPerCell: 0, leavesPerCluster: 1,
                    clusterRadius: 0, leafLength: 10...16,
                    chainsPerCell: 16, chainLinks: 3...5, chainSpacing: 16...22,
-                   splitChance: 0.55, splitSeparation: 7.5...11),
+                   splitChance: 0.55, splitSeparation: 7.5...11,
+                   sway: Sway(trunk: 48, branch: 24, branchTurn: 5)),
         LayerStyle(kind: .leaves, height: 0.9, baseStride: 1.2, clustersPerCell: 4.8, leavesPerCluster: 16,
-                   clusterRadius: 110, leafLength: 60...120),
+                   clusterRadius: 110, leafLength: 60...120,
+                   sway: Sway(trunk: 24, branch: 12, branchTurn: 2.4, flutter: 0.15)),
         // Low and loose, so single leaves read as sharp shapes (stop B: the author asked for sharper leaves).
         LayerStyle(kind: .leaves, height: 0.25, baseStride: 0.6, clustersPerCell: 4.8, leavesPerCluster: 6,
-                   clusterRadius: 160, leafLength: 50...110),
+                   clusterRadius: 160, leafLength: 50...110,
+                   sway: Sway(trunk: 8, branch: 4.8, branchTurn: 1, flutter: 0.05)),
     ]
 }
 
@@ -98,7 +122,9 @@ enum Canopy {
                     for _ in 0..<style.leavesPerCluster {
                         let spread = SIMD2(min(max(random.gaussian(), -3), 3), min(max(random.gaussian(), -3), 3))
                             * style.clusterRadius * scale / 2
-                        leaves.append(leaf(at: tip + spread, style: style, scale: scale, random: &random))
+                        var shape = leaf(at: tip + spread, style: style, scale: scale, random: &random)
+                        shape.anchor = SIMD2<Float>(tip)
+                        leaves.append(shape)
                     }
                 }
                 guard style.chainsPerCell > 0 else { continue }
@@ -109,6 +135,7 @@ enum Canopy {
                 let chains = Int((style.chainsPerCell * density + twig.unit()).rounded(.down))
                 for _ in 0..<chains {
                     var point = SIMD2(Double(cx) + twig.unit(), Double(cy) + twig.unit()) * cellSize
+                    let anchor = SIMD2<Float>(point)
                     var heading = twig.unit() * 2 * .pi
                     let links = style.chainLinks.lowerBound + Int(twig.unit() * Double(style.chainLinks.count))
                     for link in 0..<links {
@@ -118,7 +145,8 @@ enum Canopy {
                                 + (style.chainSpacing.upperBound - style.chainSpacing.lowerBound) * twig.unit()
                             point += SIMD2(cos(heading), sin(heading)) * spacing * scale
                         }
-                        let gap = leaf(at: point, style: style, scale: scale, random: &twig)
+                        var gap = leaf(at: point, style: style, scale: scale, random: &twig)
+                        gap.anchor = anchor
                         leaves += Self.split(gap, heading: heading, style: style, scale: scale, random: &split)
                     }
                 }
@@ -139,7 +167,8 @@ enum Canopy {
             halfWidth: Float(length * (isGap ? 0.3 + 0.2 * random.unit() : 0.22 + 0.12 * random.unit())),
             angle: Float(random.unit() * 2 * .pi),
             transmission: isGap ? LayerStyle.crownTransmission
-                : SIMD3<Float>(0.08, 0.14, 0.04) * Float(0.7 + 0.6 * random.unit()))
+                : SIMD3<Float>(0.08, 0.14, 0.04) * Float(0.7 + 0.6 * random.unit()),
+            anchor: SIMD2<Float>(center))
     }
 
     /// The gap as is, or two smaller openings with the same total area and the same centre of light,
@@ -169,9 +198,9 @@ enum Canopy {
     }
 
     /// Cells whose leaves can reach `bounds`: the spread is clamped to three standard deviations,
-    /// plus a twig's reach and the longest leaf.
+    /// plus a twig's reach, the longest leaf, and how far the wind can move them.
     static func cellRange(_ bounds: CGRect, style: LayerStyle, scale: Double) -> (x: ClosedRange<Int>, y: ClosedRange<Int>) {
-        let margin = (1.5 * style.clusterRadius + style.chainReach + style.leafLength.upperBound) * scale
+        let margin = (1.5 * style.clusterRadius + style.chainReach + style.leafLength.upperBound) * scale + style.swayReach
         func range(_ low: Double, _ high: Double) -> ClosedRange<Int> {
             Int(((low - margin) / cellSize).rounded(.down))...Int(((high + margin) / cellSize).rounded(.down))
         }

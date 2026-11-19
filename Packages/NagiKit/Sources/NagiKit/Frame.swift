@@ -97,14 +97,60 @@ public struct CelestialPosition: Sendable {
     }
 }
 
+/// The shared wind (SPEC 3.6) at one instant of the wind clock. The core fills it in; effects read
+/// the mean wind and evaluate gusts where they need them (DECISIONS D19).
 public struct Wind: Sendable {
     /// Mean wind, metres per second, in desktop coordinates (x right, y down).
     public var velocity = SIMD2<Double>(0, 0)
-    /// Seed of the shared gust and turbulence field.
-    public var fieldSeed: UInt64 = 0
-    public init(velocity: SIMD2<Double> = .zero, fieldSeed: UInt64 = 0) {
+    /// Seconds on the wind clock: monotonic, and slowed while Reduce Motion is on.
+    public var time = 0.0
+    /// The direction gust fronts travel, a unit vector in desktop coordinates.
+    public var frontDirection = SIMD2<Double>(1, 0)
+    /// The gusts that can be felt somewhere on the desktop around now.
+    public var gusts: [Gust] = []
+
+    /// How fast a gust front crosses the ground, millimetres per second. Real gusts cross a display
+    /// in a fifth of a second; this is slow enough to watch one cross (the author's choice, D19).
+    public static let frontSpeed = 250.0
+
+    public init(velocity: SIMD2<Double> = .zero, time: Double = 0, frontDirection: SIMD2<Double> = SIMD2(1, 0),
+                gusts: [Gust] = []) {
         self.velocity = velocity
-        self.fieldSeed = fieldSeed
+        self.time = time
+        self.frontDirection = frontDirection
+        self.gusts = gusts
+    }
+
+    /// Gust strength, 0…1, at a ground point (desktop millimetres): the front reaches points
+    /// downwind later.
+    public func gust(at point: SIMD2<Double>) -> Double {
+        let local = time - (point.x * frontDirection.x + point.y * frontDirection.y) / Self.frontSpeed
+        return gusts.reduce(0) { max($0, $1.envelope(at: local)) }
+    }
+
+    public struct Gust: Sendable, Equatable {
+        /// Wind-clock seconds when the front passes the desktop origin.
+        public var onset: Double
+        /// Seconds to full strength, and from onset until it has died away.
+        public var rise: Double
+        public var duration: Double
+        /// 0…1.
+        public var strength: Double
+
+        public init(onset: Double, rise: Double, duration: Double, strength: Double) {
+            self.onset = onset
+            self.rise = rise
+            self.duration = duration
+            self.strength = strength
+        }
+
+        /// A smooth rise, then a slower release. Komorebi.metal evaluates the same curve.
+        public func envelope(at time: Double) -> Double {
+            let s = time - onset
+            guard s > 0, s < duration else { return 0 }
+            func smooth(_ x: Double) -> Double { let c = min(max(x, 0), 1); return c * c * (3 - 2 * c) }
+            return strength * smooth(s / rise) * (1 - smooth((s - rise) / (duration - rise)))
+        }
     }
 }
 

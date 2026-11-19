@@ -58,26 +58,8 @@ public final class Komorebi: Effect {
     public init(context: EffectContext) throws {
         device = context.device
         let library = try device.makeDefaultLibrary(bundle: Bundle.module)
-        let leaf = MTLRenderPipelineDescriptor()
-        leaf.vertexFunction = library.makeFunction(name: "leafVertex")
-        leaf.fragmentFunction = library.makeFunction(name: "leafFragment")
-        leaf.colorAttachments[0].pixelFormat = .rgba16Float
-        // Multiply: the mask starts at 1 (open sky) and each leaf multiplies in its transmission.
-        leaf.colorAttachments[0].isBlendingEnabled = true
-        leaf.colorAttachments[0].sourceRGBBlendFactor = .destinationColor
-        leaf.colorAttachments[0].destinationRGBBlendFactor = .zero
-        leaf.colorAttachments[0].sourceAlphaBlendFactor = .zero
-        leaf.colorAttachments[0].destinationAlphaBlendFactor = .one
-        leafPipeline = try device.makeRenderPipelineState(descriptor: leaf)
-        let gap = MTLRenderPipelineDescriptor()
-        gap.vertexFunction = library.makeFunction(name: "leafVertex")
-        gap.fragmentFunction = library.makeFunction(name: "gapFragment")
-        gap.colorAttachments[0].pixelFormat = .rgba16Float
-        // Max: an opening raises the crown's transmission towards open sky.
-        gap.colorAttachments[0].isBlendingEnabled = true
-        gap.colorAttachments[0].rgbBlendOperation = .max
-        gap.colorAttachments[0].alphaBlendOperation = .max
-        gapPipeline = try device.makeRenderPipelineState(descriptor: gap)
+        leafPipeline = try Self.maskPipeline(.leaves, device: device, library: library)
+        gapPipeline = try Self.maskPipeline(.gaps, device: device, library: library)
         let composite = MTLRenderPipelineDescriptor()
         composite.vertexFunction = library.makeFunction(name: "komorebiFullscreen")
         composite.fragmentFunction = library.makeFunction(name: "komorebiComposite")
@@ -118,6 +100,7 @@ public final class Komorebi: Effect {
         let ground = CGRect(x: origin.x, y: origin.y, width: view.frameInDesktop.width * millimetresPerPoint,
                             height: view.frameInDesktop.height * millimetresPerPoint)
         let weights = Self.layerWeights(depth: frame.depth)
+        let wind = Self.windUniforms(frame)
         let spread = Float(Self.clamped(frame.number("blurSpread", default: 0.6), 0...1.5, default: 0.6))
         var masks: [MaskUniforms] = []
         var textures: [any MTLTexture] = []
@@ -132,7 +115,7 @@ public final class Komorebi: Effect {
                                          sun: sun, ground: ground, imageScale: Double(exp2(spread)))
             let resources = try prepare(layer: index, style: style, geometry: geometry, ground: ground, frame: frame,
                                         spread: spread, display: view.id)
-            encodeMask(resources, style: style, encoder: encoder)
+            encodeMask(resources, style: style, sway: wind.with(style.sway), encoder: encoder)
             var uniforms = resources.uniforms
             uniforms.strideOffset.w = Float(weights[index])
             masks.append(uniforms)
@@ -264,7 +247,8 @@ public final class Komorebi: Effect {
         return resources
     }
 
-    private func encodeMask(_ resources: LayerResources, style: LayerStyle, encoder: any EffectEncoder) {
+    private func encodeMask(_ resources: LayerResources, style: LayerStyle, sway: SwayUniforms,
+                            encoder: any EffectEncoder) {
         let pass = MTLRenderPassDescriptor()
         pass.colorAttachments[0].texture = resources.mask
         pass.colorAttachments[0].loadAction = .clear
@@ -274,17 +258,88 @@ public final class Komorebi: Effect {
             : MTLClearColor(red: 1, green: 1, blue: 1, alpha: 1)
         pass.colorAttachments[0].storeAction = .store
         var uniforms = resources.uniforms
+        var sway = sway
         encoder.render(to: pass) { render in
             guard let leaves = resources.leaves, resources.leafCount > 0 else { return }
             render.setRenderPipelineState(style.kind == .gaps ? gapPipeline : leafPipeline)
             render.setVertexBuffer(leaves, offset: 0, index: 0)
             render.setVertexBytes(&uniforms, length: MemoryLayout<MaskUniforms>.stride, index: 1)
+            render.setVertexBytes(&sway, length: MemoryLayout<SwayUniforms>.stride, index: 2)
             render.drawPrimitives(type: .triangleStrip, vertexStart: 0, vertexCount: 4, instanceCount: resources.leafCount)
         }
         encoder.compute { compute in
             filter.encode(mask: resources.mask, prefix: resources.prefix, filtered: resources.filtered,
                           image: resources.image, into: compute)
         }
+    }
+
+    /// The pipeline that draws a layer's shapes into its mask.
+    static func maskPipeline(_ kind: LayerStyle.Kind, device: any MTLDevice,
+                             library: any MTLLibrary) throws -> any MTLRenderPipelineState {
+        let descriptor = MTLRenderPipelineDescriptor()
+        descriptor.vertexFunction = library.makeFunction(name: "leafVertex")
+        descriptor.colorAttachments[0].pixelFormat = .rgba16Float
+        descriptor.colorAttachments[0].isBlendingEnabled = true
+        switch kind {
+        case .leaves:
+            // Multiply: the mask starts at 1 (open sky) and each leaf multiplies in its transmission.
+            descriptor.fragmentFunction = library.makeFunction(name: "leafFragment")
+            descriptor.colorAttachments[0].sourceRGBBlendFactor = .destinationColor
+            descriptor.colorAttachments[0].destinationRGBBlendFactor = .zero
+            descriptor.colorAttachments[0].sourceAlphaBlendFactor = .zero
+            descriptor.colorAttachments[0].destinationAlphaBlendFactor = .one
+        case .gaps:
+            // Add: an opening adds the light it lets through to the crown's transmission.
+            descriptor.fragmentFunction = library.makeFunction(name: "gapFragment")
+            descriptor.colorAttachments[0].sourceRGBBlendFactor = .one
+            descriptor.colorAttachments[0].destinationRGBBlendFactor = .one
+            descriptor.colorAttachments[0].sourceAlphaBlendFactor = .zero
+            descriptor.colorAttachments[0].destinationAlphaBlendFactor = .one
+        }
+        return try device.makeRenderPipelineState(descriptor: descriptor)
+    }
+
+    // MARK: - Wind
+
+    /// The waves of the three tiers (SPEC 4.1: trunk 0.1–0.3 Hz, branch 0.5–1 Hz, leaf 2–5 Hz),
+    /// spaced by powers of the golden ratio, so no two share a period (and all of them never
+    /// realign) however long the wind blows.
+    static let golden = (1 + 5.0.squareRoot()) / 2
+    static let trunkWaves = 0.11 * SIMD3<Double>(1, golden, golden * golden)
+    static let branchWaves = 0.53 * SIMD3<Double>(1, golden.squareRoot(), golden)
+    static let flutterWaves = 2.2 * SIMD3<Double>(1, golden.squareRoot(), golden)
+    /// The mean wind that gives the full response without a gust, metres per second.
+    static let fullWind = 3.5
+
+    /// This frame's wind for the leaf shader, before the layer's amplitudes (DECISIONS D19). The
+    /// phases are taken modulo one cycle in double precision, so a long-running wind clock does
+    /// not make the waves stutter.
+    static func windUniforms(_ frame: FrameState) -> SwayUniforms {
+        let wind = frame.environment.wind
+        // The slider runs linearly from a light stir (0) through the author's choice (0.5) to
+        // half as much again (1); the canopy never stands quite still (DECISIONS D19).
+        let slider = clamped(frame.number("wind", default: 0.5), 0...1, default: 0.5)
+        let gain = (0.25 + 0.5 * slider) * (frame.accessibility.reduceMotion ? 0.25 : 1)
+        let speed = simd_length(wind.velocity)
+        let along = speed > 1e-6 ? wind.velocity / speed : wind.frontDirection
+        func phases(_ waves: SIMD3<Double>) -> SIMD4<Float> {
+            let cycles = waves * wind.time
+            return SIMD4(SIMD3<Float>(cycles - cycles.rounded(.down)), 0)
+        }
+        var uniforms = SwayUniforms()
+        uniforms.direction = SIMD4(Float(along.x), Float(along.y), Float(wind.frontDirection.x), Float(wind.frontDirection.y))
+        let gusts = wind.gusts.prefix(SwayUniforms.maxGusts)
+        uniforms.strength = SIMD4(Float(gain), Float(min(speed / fullWind, 1)), Float(Wind.frontSpeed), Float(gusts.count))
+        uniforms.trunk = phases(trunkWaves)
+        uniforms.branch = phases(branchWaves)
+        uniforms.flutter = phases(flutterWaves)
+        withUnsafeMutableBytes(of: &uniforms.gusts) { raw in
+            let slots = raw.bindMemory(to: SIMD4<Float>.self)
+            for (index, gust) in gusts.enumerated() {
+                slots[index] = SIMD4(Float(gust.onset - wind.time), Float(gust.rise), Float(gust.duration), Float(gust.strength))
+            }
+        }
+        return uniforms
     }
 
     // MARK: - Helpers
@@ -321,6 +376,27 @@ public final class Komorebi: Effect {
                               0.0332 * srgb.x + 0.9669 * srgb.y,
                               0.0171 * srgb.x + 0.0724 * srgb.y + 0.9108 * srgb.z)
         return p3 / max(p3.max(), 1e-6)
+    }
+}
+
+/// Matches `SwayUniforms` in Komorebi.metal.
+struct SwayUniforms {
+    static let maxGusts = 8
+    var direction = SIMD4<Float>(1, 0, 1, 0)
+    var strength = SIMD4<Float>(0, 0, 250, 0)
+    var amplitude = SIMD4<Float>.zero
+    var trunk = SIMD4<Float>.zero
+    var branch = SIMD4<Float>.zero
+    var flutter = SIMD4<Float>.zero
+    var gusts = (SIMD4<Float>.zero, SIMD4<Float>.zero, SIMD4<Float>.zero, SIMD4<Float>.zero,
+                 SIMD4<Float>.zero, SIMD4<Float>.zero, SIMD4<Float>.zero, SIMD4<Float>.zero)
+
+    /// The same wind with a layer's amplitudes.
+    func with(_ sway: LayerStyle.Sway) -> SwayUniforms {
+        var copy = self
+        copy.amplitude = SIMD4(Float(sway.trunk), Float(sway.branch), Float(sway.branchTurn * .pi / 180),
+                               Float(sway.flutter * .pi / 180))
+        return copy
     }
 }
 

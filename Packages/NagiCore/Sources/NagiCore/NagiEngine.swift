@@ -15,6 +15,8 @@ import QuartzCore
     public var location: GeoLocation?
     /// A fixed wall-clock date for the sun (stop B looks at daylight in the evening).
     public var pinnedDate: Date?
+    /// Debug: hold the mean wind at the strongest the model gives, with every gust at full strength.
+    public var strongestWind = false
     public var suppressDuringMedia = true
     /// Paused until this date; `.distantFuture` pauses until resumed.
     public var pausedUntil: Date? {
@@ -35,6 +37,11 @@ import QuartzCore
     private var mediaActive = false
     private var mediaCheckedAt = -Double.infinity
     private var frame: FrameState?
+    /// The wind clock (DECISIONS D19): starts at the uptime, so each launch meets different wind,
+    /// keeps running while nagi is hidden, and runs at half speed while Reduce Motion is on,
+    /// without jumping when it is switched.
+    private var windClock = ProcessInfo.processInfo.systemUptime
+    private var windClockRead = ProcessInfo.processInfo.systemUptime
     /// Set when the watchdog or the guard took nagi down: it stays down until the state
     /// machine has gone back to active, so a fade cannot bring it back.
     private var forcedDown = false
@@ -97,6 +104,15 @@ import QuartzCore
     // MARK: - Sampling
 
     private static var now: Double { ProcessInfo.processInfo.systemUptime }
+
+    /// The system's accessibility settings (SPEC 2.2), read each frame.
+    private static var accessibility: AccessibilityAdjustments {
+        let workspace = NSWorkspace.shared
+        return AccessibilityAdjustments(
+            reduceMotion: workspace.accessibilityDisplayShouldReduceMotion,
+            reduceStrength: workspace.accessibilityDisplayShouldIncreaseContrast
+                || workspace.accessibilityDisplayShouldReduceTransparency)
+    }
 
     /// Reads the signals and steps the state machine; shows or hides the overlays and schedules
     /// the next wake. Called by the wake timer, by every frame and by signal changes.
@@ -210,11 +226,17 @@ import QuartzCore
         if display == overlays.driverDisplay || self.frame == nil {
             let now = Self.now
             let date = pinnedDate ?? Date()
+            let deltaTime = now - (self.frame?.time ?? now)
+            let accessibility = Self.accessibility
+            windClock += (now - windClockRead) * (accessibility.reduceMotion ? 0.5 : 1)
+            windClockRead = now
             frame = FrameState(
-                time: now, deltaTime: now - (self.frame?.time ?? now), date: date, phase: phase(output.phase),
-                presence: output.presence, depth: output.depth, appearance: Self.appearance, seed: 1,
+                time: now, deltaTime: deltaTime, date: date, phase: phase(output.phase),
+                presence: output.presence, depth: output.depth, appearance: Self.appearance,
+                accessibility: accessibility, seed: 1,
                 environment: EnvironmentModel.environment(
-                    at: date, location: location ?? EnvironmentModel.defaultLocation(at: date)))
+                    at: date, location: location ?? EnvironmentModel.defaultLocation(at: date),
+                    windTime: windClock, seed: 1, strongest: strongestWind))
             renderer.update(frame)
             self.frame = frame
         } else {
