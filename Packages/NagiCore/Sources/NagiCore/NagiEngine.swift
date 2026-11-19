@@ -58,6 +58,9 @@ import QuartzCore
     private var framesThisShowing = 0
     /// GPU milliseconds of recent frames, logged every few seconds with `--trace` (M1-PLAN 7.3).
     private let gpuTimes = GPUTimes()
+    /// Intervals between presented frames on the driver display (trace only).
+    private var frameIntervals: [Double] = []
+    private var lastPresentation: CFTimeInterval?
     private let withdrawalGuard: WithdrawalGuard
     private let trace: Logger?
     private var screenObserver: (any NSObjectProtocol)?
@@ -164,6 +167,8 @@ import QuartzCore
         watchdog = nil
         log("\(reason) frames=\(framesThisShowing)")
         framesThisShowing = 0
+        lastPresentation = nil
+        frameIntervals.removeAll()
     }
 
     /// Takes nagi down outside the state machine (watchdog, guard) and keeps it down until the
@@ -283,9 +288,29 @@ import QuartzCore
         if trace != nil {
             let times = gpuTimes
             commandBuffer.addCompletedHandler { buffer in times.add((buffer.gpuEndTime - buffer.gpuStartTime) * 1000) }
-            if framesThisShowing % 300 == 0, let summary = gpuTimes.drain() { log("gpu \(summary)") }
+            if display == overlays.driverDisplay {
+                let target = update.targetPresentationTimestamp
+                if let last = lastPresentation { frameIntervals.append((target - last) * 1000) }
+                lastPresentation = target
+            }
+            if framesThisShowing % 300 == 0 {
+                if let summary = gpuTimes.drain() { log("gpu \(summary)") }
+                if let summary = Self.intervalSummary(frameIntervals) { log("frames \(summary)") }
+                frameIntervals.removeAll()
+            }
         }
         commandBuffer.commit()
+    }
+
+    /// "n=… median=… p99=… max=… ms late=…": late frames came over 1.5 times the median
+    /// interval after the previous one (a frame was missed).
+    private static func intervalSummary(_ intervals: [Double]) -> String? {
+        guard !intervals.isEmpty else { return nil }
+        let sorted = intervals.sorted()
+        let median = sorted[sorted.count / 2]
+        let p99 = sorted[min(sorted.count - 1, Int(Double(sorted.count) * 0.99))]
+        let late = sorted.filter { $0 > median * 1.5 }.count
+        return String(format: "n=%d median=%.2f p99=%.2f max=%.2f ms late=%d", sorted.count, median, p99, sorted.last!, late)
     }
 
     private static var appearance: Appearance {
