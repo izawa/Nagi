@@ -18,6 +18,7 @@ rm -rf $app
 mkdir -p $app/Contents/MacOS $app/Contents/Resources
 /bin/cp -f $products/Nagi $app/Contents/MacOS/Nagi
 for bundle in $products/*.bundle(N); do /bin/cp -R $bundle $app/Contents/Resources/; done
+/bin/cp -f $root/App/AppIcon/AppIcon.icns $app/Contents/Resources/  # drawn by scripts/make-icon.py
 cat > $app/Contents/Info.plist <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -26,6 +27,7 @@ cat > $app/Contents/Info.plist <<PLIST
   <key>CFBundleExecutable</key><string>Nagi</string>
   <key>CFBundleName</key><string>Nagi</string>
   <key>CFBundleDisplayName</key><string>Nagi</string>
+  <key>CFBundleIconFile</key><string>AppIcon</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleShortVersionString</key><string>0.1.0</string>
   <key>CFBundleVersion</key><string>$(date +%Y%m%d%H%M%S)</string>
