@@ -31,9 +31,9 @@
    DMG の見た目(開いたウインドウの背景と配置、マウントしたときのアイコン)は `scripts/make_dmg.sh` が Finder に設定させる。画面のある Mac で、同じ名前の DMG をマウントしていない状態で実行する。初回は「Finder を操作しようとしています」の許可が要る。
    背景とボリュームのアイコンの絵は `scripts/make_dmg_art.py`(Pillow と numpy)の先頭の `CONFIG` で決まる。アプリのアイコン(`scripts/make-icon.py --render`)か `CONFIG` を直したら、実行して `App/DMG` の画像を作り直し、コミットする。
    公証は数分かかる。終わると `build/Nagi-<版>.dmg` と、その SHA-256(`build/Nagi-<版>.dmg.sha256`)ができる。Apple に送らずに署名までを試すときは `--no-notarize` を付ける。
-4. **ダウンロードした形で入れて確かめる。** 手元で作った DMG には隔離属性が付かないので、そのまま開いても Gatekeeper の確かめにならない。`build/` を手元の HTTP サーバーで出し、Safari で落とす(curl では隔離属性が付かない)。
+4. **ダウンロードした形で入れて確かめる。** 手元で作った DMG には隔離属性が付かないので、そのまま開いても Gatekeeper の確かめにならない。`build/` を手元の HTTP サーバーで出し、Safari か Chrome で落とす(curl では隔離属性が付かない)。
    ```sh
-   (cd build && python3 -m http.server --bind 127.0.0.1 8000)   # Safari で http://127.0.0.1:8000/Nagi-<版>.dmg を開く
+   (cd build && python3 -m http.server --bind 127.0.0.1 8000)   # ブラウザで http://127.0.0.1:8000/Nagi-<版>.dmg を開く
    xattr -p com.apple.quarantine ~/Downloads/Nagi-<版>.dmg   # 値が出ること
    ```
    開発中の `build/Nagi.app` は終了しておく。DMG を開いて Nagi を Applications へドラッグし、Finder から起動する。初回の確認のあと、警告なしに起動することを見る。入れた .app も確かめる。
