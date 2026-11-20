@@ -1,4 +1,5 @@
 import KomorebiEffect
+import MossEffect
 import RainEffect
 import NagiKit
 
@@ -9,6 +10,7 @@ public enum EffectCatalog {
         [
             Komorebi.self,
             Rain.self,
+            Moss.self,
         ]
     }
 }

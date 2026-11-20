@@ -56,10 +56,10 @@ struct SettingsTests {
     @Test func effectsNeedingPermissionStartOff() throws {
         let types: [any Effect.Type] = effects + [GlassStub.self]
         let old = try decode("{}").validated(effects: types)
-        #expect(old.enabledEffects == ["komorebi"])
+        #expect(old.enabledEffects == ["komorebi", "moss"])
         var switched = try decode("{}")
         switched.setEnabled("komorebi", false, among: types)
-        #expect(switched.enabledEffects == [])
+        #expect(switched.enabledEffects == ["moss"])
         #expect(!NagiSettings().isEnabled("test.glass", among: types))
         #expect(try decode(#"{"enabledEffects": ["test.glass"]}"#).validated(effects: types).enabledEffects == ["test.glass"])
         #expect(try decode("{}").effectMode == .all)
