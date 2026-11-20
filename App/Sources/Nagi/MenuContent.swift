@@ -82,7 +82,7 @@ struct EffectToggles: View {
 struct MenuIcon: View {
     let store: SettingsStore
     var body: some View {
-        Image(systemName: store.settings.isPaused(at: Date()) ? "leaf.circle" : "leaf")
+        Image(nsImage: store.settings.isPaused(at: Date()) ? MenuGlyph.paused : MenuGlyph.normal)
             .accessibilityLabel(store.settings.isPaused(at: Date())
                 ? String(localized: "凪(一時停止中)", bundle: .module) : String(localized: "凪", bundle: .module))
     }

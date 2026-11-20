@@ -13,7 +13,7 @@ struct OnboardingView: View {
             Text(String(format: String(localized: "キーボードとマウスから手を離して %lld 秒たつと、画面に木漏れ日が少しずつ現れます。手を動かすと、すぐに消えます。", bundle: .module),
                         Int(store.settings.onsetSeconds)))
             Text(String(localized: "日の光で描くので、日が沈むと現れません。月が出ている夜は、月明かりで薄く現れます。", bundle: .module))
-            Text(String(localized: "一時停止と設定は、メニューバーの葉のアイコンから開けます。", bundle: .module))
+            Text(String(localized: "一時停止と設定は、メニューバーのしずくのアイコンから開けます。", bundle: .module))
             Form {
                 EffectToggles(store: store)
                 LoginItemSection(login: login)

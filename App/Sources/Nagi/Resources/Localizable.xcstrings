@@ -171,12 +171,12 @@
         }
       }
     },
-    "一時停止と設定は、メニューバーの葉のアイコンから開けます。": {
+    "一時停止と設定は、メニューバーのしずくのアイコンから開けます。": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Pause and Settings are in the leaf icon in the menu bar."
+            "value": "Pause and Settings are in the drop icon in the menu bar."
           }
         }
       }

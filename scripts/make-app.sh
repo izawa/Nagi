@@ -30,7 +30,7 @@ if pgrep -xq Nagi; then
     osascript -e 'tell application id "org.izawa.Nagi" to quit' >/dev/null 2>&1 || true
     for _ in {1..50}; do pgrep -xq Nagi || break; sleep 0.1; done
     if pgrep -xq Nagi; then
-        echo "✗ Nagi が終了しませんでした。メニューバーの葉から終了してから、もう一度実行してください。" >&2
+        echo "✗ Nagi が終了しませんでした。メニューバーのしずくから終了してから、もう一度実行してください。" >&2
         exit 1
     fi
 fi
