@@ -2,41 +2,70 @@ import AppKit
 import NagiKit
 import SwiftUI
 
-/// The menu-bar menu (SPEC 2.4, DECISIONS D26): the effects, see it now, pause, settings, quit.
+/// The menu-bar panel (SPEC 2.4, DECISIONS D26, D34): the effects, see it now, pause, settings,
+/// quit. A panel rather than a menu, so several effects can be switched without reopening it;
+/// what leads elsewhere closes it first.
 struct MenuContent: View {
     let delegate: AppDelegate
     var store: SettingsStore { delegate.settings }
 
     var body: some View {
-        // The effects' notes (after sunset, komorebi shows nothing): informational, not a command.
-        ForEach(delegate.notes.lines, id: \.self) { Text($0) }
-        if !delegate.notes.lines.isEmpty { Divider() }
-        EffectToggles(store: store, screenRecording: delegate.screenRecording) { delegate.showSettings(tab: .permissions) }
-        Toggle(String(localized: "1 つを選んで出す", bundle: .module), isOn: Binding(
-            get: { store.settings.effectMode == .random },
-            set: { on in store.update { $0.effectMode = on ? .random : .all } }))
-        Divider()
-        Button(String(localized: "今すぐ見る", bundle: .module)) { delegate.engine?.preview() }
-            .disabled(delegate.windowsHoldOff || store.settings.strength <= 0
-                || !(delegate.engine?.hasRunnableEffect ?? false) || store.settings.isPaused(at: Date()))
-        pause
-        Divider()
-        Button(String(localized: "設定…", bundle: .module)) { delegate.showSettings() }
-            .keyboardShortcut(",")
-        if AppDelegate.galleryAllowed {
-            // A debug tool: not translated (DECISIONS D24).
-            Button { delegate.showGallery() } label: { Text(verbatim: "ギャラリー…") }
+        VStack(alignment: .leading, spacing: 8) {
+            EffectToggles(store: store, screenRecording: delegate.screenRecording) {
+                Self.closePanel()
+                delegate.showSettings(tab: .permissions)
+            }
+            Toggle(String(localized: "1 つを選んで出す", bundle: .module), isOn: Binding(
+                get: { store.settings.effectMode == .random },
+                set: { on in store.update { $0.effectMode = on ? .random : .all } }))
+            // The effects' notes (after sunset, komorebi shows nothing): informational, not a
+            // command. Below the switches, so a note coming or going never moves them.
+            ForEach(delegate.notes.lines, id: \.self) { line in
+                Text(line).font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            }
+            Divider()
+            row(String(localized: "今すぐ見る", bundle: .module)) { delegate.engine?.preview() }
+                .disabled(delegate.windowsHoldOff || store.settings.strength <= 0
+                    || !(delegate.engine?.hasRunnableEffect ?? false) || store.settings.isPaused(at: Date()))
+            pause
+            Divider()
+            row(String(localized: "設定…", bundle: .module)) { delegate.showSettings() }
+                .keyboardShortcut(",")
+            if AppDelegate.galleryAllowed {
+                // A debug tool: not translated (DECISIONS D24).
+                row("ギャラリー…") { delegate.showGallery() }
+            }
+            Divider()
+            row(String(localized: "凪を終了", bundle: .module)) { NSApplication.shared.terminate(nil) }
+                .keyboardShortcut("q")
         }
-        Divider()
-        Button(String(localized: "凪を終了", bundle: .module)) { NSApplication.shared.terminate(nil) }
-            .keyboardShortcut("q")
+        .toggleStyle(RowSwitch())
+        .padding(14)
+        .frame(width: 280, alignment: .leading)
+    }
+
+    /// A command: closes the panel, then acts.
+    private func row(_ title: String, action: @escaping () -> Void) -> some View {
+        Button {
+            Self.closePanel()
+            action()
+        } label: {
+            Text(verbatim: title).frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
+        }
+        .buttonStyle(.borderless)
+    }
+
+    /// The panel is the key window while it is open.
+    static func closePanel() {
+        NSApp.keyWindow?.close()
     }
 
     @ViewBuilder private var pause: some View {
         if store.settings.isPaused(at: Date()) {
-            Text(Self.pausedLabel(store.settings.pause))
-            Button(String(localized: "再開", bundle: .module)) { store.update { $0.pause = .none } }
+            Text(Self.pausedLabel(store.settings.pause)).foregroundStyle(.secondary)
+            row(String(localized: "再開", bundle: .module)) { store.update { $0.pause = .none } }
         } else {
+            // A pull-down in the panel; after choosing, the panel says until when.
             Menu(String(localized: "一時停止", bundle: .module)) {
                 Button(String(localized: "1 時間", bundle: .module)) {
                     store.update { $0.pause = .until(Date(timeIntervalSinceNow: 3600)) }
@@ -48,6 +77,7 @@ struct MenuContent: View {
                     store.update { $0.pause = .untilResumed }
                 }
             }
+            .fixedSize()
         }
     }
 
@@ -65,6 +95,17 @@ struct MenuContent: View {
     static func endOfToday(now: Date = Date(), calendar: Calendar = .current) -> Date {
         calendar.nextDate(after: now, matching: DateComponents(hour: 0, minute: 0), matchingPolicy: .nextTime)
             ?? now.addingTimeInterval(86400)
+    }
+}
+
+/// A switch at the right end of its row, so the switches line up whatever the label's length.
+/// The label stays part of the switch: clicking it switches, and VoiceOver reads it.
+struct RowSwitch: ToggleStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        Toggle(isOn: configuration.$isOn) {
+            configuration.label.frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .toggleStyle(.switch)
     }
 }
 

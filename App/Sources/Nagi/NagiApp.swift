@@ -48,6 +48,9 @@ import SwiftUI
         } label: {
             MenuIcon(store: delegate.settings)
         }
+        // A small panel, not a menu: switching several effects should not close it each time
+        // (a menu item always closes the menu; SwiftUI cannot keep a macOS menu open).
+        .menuBarExtraStyle(.window)
     }
 }
 
