@@ -79,6 +79,7 @@ import SwiftUI
                                         physicalSize: SIMD2(width, width * Double(Self.pixels.y) / Double(Self.pixels.x)))
         var frame = model.advance(by: seconds)
         frame.displays = [view.frameInDesktop]
+        frame.showing = model.showings
         do {
             let background = try background(for: model.fixture)
             guard let commandBuffer = renderer.queue.makeCommandBuffer() else { return }

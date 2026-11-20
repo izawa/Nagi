@@ -62,6 +62,16 @@ struct DropsTests {
         }
     }
 
+    /// Fewer drops (Increase Contrast, Reduce Transparency) halves the rain even where the drop
+    /// budget, not the coverage, ends the placing.
+    @Test func fewerHalvesEvenAtTheBudget() {
+        let huge = CGRect(x: 0, y: 0, width: 7680, height: 4320)
+        let full = Drops.scatter(displays: [huge], coverage: 0.12, depth: 150, size: 0.5, seed: 1)
+        let fewer = Drops.scatter(displays: [huge], coverage: 0.12, depth: 150, size: 0.5, seed: 1, fewer: true)
+        let ratio = fewer.reduce(0) { $0 + $1.area } / full.reduce(0) { $0 + $1.area }
+        #expect(ratio > 0.4 && ratio < 0.6)
+    }
+
     /// Drops across the edge between two displays run together.
     @Test func dropsMergeAcrossDisplays() {
         var field = DropField()

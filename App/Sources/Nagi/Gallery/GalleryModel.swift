@@ -105,6 +105,8 @@ import Observation
         if var running = replay {
             let envelope = running.step(at: elapsed - replayStart, depth: depth)
             replay = running
+            // Every entry is a new showing, the replayed one and the one after a simulated input.
+            if envelope.phase == .entering, phase != .entering { showings += 1 }
             (phase, presence) = (envelope.phase, envelope.presence)
             return scene.frame(elapsed: elapsed, deltaTime: seconds, phase: envelope.phase.framePhase,
                                presence: envelope.presence, depth: envelope.depth)
@@ -120,6 +122,10 @@ import Observation
         replay = nil
         cloudPassAt = nil
     }
+
+    /// How many times the preview has entered (FrameState.showing): a replayed entry is a new
+    /// showing, so effects with state (rain) start over as on the desktop.
+    private(set) var showings = 0
 
     /// nagi enters now, as after the hands came to rest.
     func replayEntry() {
