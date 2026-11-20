@@ -14,11 +14,12 @@ let package = Package(
         .package(path: "../Packages/NagiKit"),
         .package(path: "../Packages/NagiCore"),
         .package(path: "../Packages/Effects/KomorebiEffect"),
+        .package(path: "../Packages/Effects/RainEffect"),
         .package(path: "../Packages/Effects/DebugEffects"),
     ],
     targets: [
         // Adding an effect: one package, plus one line in EffectCatalog (SPEC 3.2).
-        .target(name: "EffectCatalog", dependencies: ["NagiKit", "KomorebiEffect"]),
+        .target(name: "EffectCatalog", dependencies: ["NagiKit", "KomorebiEffect", "RainEffect"]),
         .executableTarget(
             name: "Nagi",
             dependencies: ["NagiKit", "NagiCore", "EffectCatalog", "DebugEffects"],

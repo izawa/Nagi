@@ -9,6 +9,9 @@ import SwiftUI
 struct GalleryView: View {
     @Bindable var model: GalleryModel
     let preview: GalleryPreviewView
+    /// Every effect the gallery can show, and how to switch to one (a new model and renderer).
+    let effects: [EffectDescriptor]
+    let choose: (String) -> Void
 
     var body: some View {
         HStack(spacing: 0) {
@@ -24,6 +27,11 @@ struct GalleryView: View {
     }
 
     @ViewBuilder private var controls: some View {
+        Section("エフェクト") {
+            Picker("エフェクト", selection: Binding(get: { model.effect.descriptor.id }, set: choose)) {
+                ForEach(effects, id: \.id) { Text($0.displayName).tag($0.id) }
+            }
+        }
         Section("背景と外観") {
             Picker("背景", selection: $model.fixture) {
                 Text("本文(ライト)").tag(GalleryModel.Fixture.readingLight)
@@ -69,7 +77,8 @@ struct GalleryView: View {
         }
         Section("深さ") {
             LabeledContent("深さ \(Int(model.depth)) 秒") {
-                Slider(value: $model.depth, in: 0...60)
+                // Rain reaches its downpour at two minutes (SPEC 4.2).
+                Slider(value: $model.depth, in: 0...180)
             }
             Toggle("実時間で深める", isOn: $model.deepening)
         }
@@ -174,27 +183,41 @@ struct GalleryView: View {
             window.orderFrontRegardless()
             return
         }
-        guard let engine, let effect = EffectCatalog.all.first else { return }
-        let model = GalleryModel(effect: effect)
+        guard engine != nil, let effect = EffectCatalog.all.first else { return }
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1280, height: 640),
+                              styleMask: [.titled, .closable, .resizable, .miniaturizable],
+                              backing: .buffered, defer: false)
+        window.title = "ギャラリー"
+        window.isReleasedWhenClosed = false
+        window.delegate = self
+        self.window = window
+        guard show(effect) else { self.window = nil; return }
+        window.center()
+        engine?.hold("gallery", true)
+        NSApp.activate()
+        window.makeKeyAndOrderFront(nil)
+        window.orderFrontRegardless()
+    }
+
+    /// Puts `effect` in the window, with its own model and renderer.
+    @discardableResult private func show(_ effect: any Effect.Type) -> Bool {
+        guard let engine, let window else { return false }
         do {
+            let model = GalleryModel(effect: effect)
             let preview = try GalleryPreviewView(model: model, device: engine.renderer.device)
-            let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1280, height: 640),
-                                  styleMask: [.titled, .closable, .resizable, .miniaturizable],
-                                  backing: .buffered, defer: false)
-            window.title = "ギャラリー"
-            window.isReleasedWhenClosed = false
-            window.contentView = NSHostingView(rootView: GalleryView(model: model, preview: preview))
-            window.delegate = self
-            window.center()
-            self.window = window
+            self.preview?.stop()
+            window.contentView = NSHostingView(rootView: GalleryView(
+                model: model, preview: preview, effects: EffectCatalog.all.map { $0.descriptor },
+                choose: { [weak self] id in
+                    guard let type = EffectCatalog.all.first(where: { $0.descriptor.id == id }) else { return }
+                    self?.show(type)
+                }))
             self.preview = preview
-            engine.hold("gallery", true)
             preview.start()
-            NSApp.activate()
-            window.makeKeyAndOrderFront(nil)
-            window.orderFrontRegardless()
+            return true
         } catch {
             NSLog("Gallery could not open: %@", error.localizedDescription)
+            return false
         }
     }
 

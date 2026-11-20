@@ -1,0 +1,56 @@
+{
+  "sourceLanguage": "ja",
+  "strings": {
+    "雨": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Rain"
+          }
+        }
+      }
+    },
+    "ガラスにつく雨粒": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Raindrops on the glass"
+          }
+        }
+      }
+    },
+    "雨の強さ": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Rain"
+          }
+        }
+      }
+    },
+    "粒の大きさ": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Drop Size"
+          }
+        }
+      }
+    },
+    "屈折の強さ": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Refraction"
+          }
+        }
+      }
+    }
+  },
+  "version": "1.0"
+}

@@ -1,4 +1,5 @@
 import KomorebiEffect
+import RainEffect
 import NagiKit
 
 /// Every effect the app ships, in no particular order (the core sorts by layer).
@@ -7,6 +8,7 @@ public enum EffectCatalog {
     public static var all: [any Effect.Type] {
         [
             Komorebi.self,
+            Rain.self,
         ]
     }
 }

@@ -90,10 +90,11 @@ import Observation
     func advance(by seconds: Double) -> FrameState {
         if playing {
             elapsed += seconds
-            if deepening { depth = min(60, depth + seconds) }
+            if deepening { depth = min(180, depth + seconds) }
         }
         var weather = EnvironmentModel.Weather(sky: sky == .natural ? .natural : .clear,
-                                               strongestWind: strongestWind)
+                                               strongestWind: strongestWind,
+                                               cloudBias: effect.descriptor.weatherHint?.cloudBias ?? 0)
         if let start = cloudPassAt {
             // After the crossing (28 s), back to the chosen sky.
             if windStart + elapsed - start > 30 { cloudPassAt = nil } else { weather.sky = .cloudPass(start: start) }
