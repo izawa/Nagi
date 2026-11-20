@@ -35,13 +35,15 @@ public final class Moss: Effect {
     static let cornerRadius = 16.0
     static let wrap = 28.0
     /// The screen's corners: how far moss spreads along the bottom and up the side.
-    static let cornerSize = CGSize(width: 72, height: 72)
+    /// Points a window's top must leave below the top of its display's usable area (under the menu
+    /// bar) for moss to grow on it: closer, the cushions would be cut off and look half grown
+    /// (the author at stop K).
+    static let headroom = 14.0
     /// Windows in front a patch is tested against; more are left out (16 windows over one band).
     static let frontCapacity = 16
 
-    /// One patch for the shader, in the display's pixels: the quad to draw, the window (or the
-    /// screen corner's area) it grows from, then seed, growth, kind (0 window, 1 bottom-left
-    /// corner, 2 bottom-right corner) and the number of front rectangles that follow, and the age.
+    /// One patch for the shader, in the display's pixels: the quad to draw, the window it grows
+    /// from, then seed, growth, (unused) and the number of front rectangles that follow, and the age.
     struct Instance {
         var quad: SIMD4<Float>
         var base: SIMD4<Float>
@@ -71,16 +73,23 @@ public final class Moss: Effect {
         var time: Float
     }
 
-    /// Where moss may grow, in desktop points: a band along a window's top or a screen corner,
-    /// with the rectangles in front that cover it.
+    /// Where moss may grow, in desktop points: a band along a window's top, with the rectangles in
+    /// front that cover it. Not in the screen's bottom corners: above the Dock it seemed to float
+    /// (the author at stop K).
     struct Patch: Equatable {
-        enum Kind: Int { case window = 0, bottomLeft = 1, bottomRight = 2 }
-        var kind: Kind
         var quad: CGRect
         var base: CGRect
         var seed: UInt32
         var age: Double
         var fronts: [CGRect]
+    }
+
+    /// Growth after the first two hours, 0 … 1 by four: colonies keep spreading to half as far
+    /// again, and thicken a little (the author at stop K).
+    static func lateGrowth(age: Double) -> Double {
+        guard age.isFinite else { return age > 0 ? 1 : 0 }
+        let t = min(max((age - 7200) / 7200, 0), 1)
+        return t * t * (3 - 2 * t)
     }
 
     /// Growth from 10 minutes to 2 hours (SPEC 4.3, M3-PLAN 5.1).
@@ -107,22 +116,17 @@ public final class Moss: Effect {
         var patches: [Patch] = []
         for (index, window) in windows.enumerated() where window.role == .surface {
             let f = window.frame
+            // The display the window is mostly on.
+            let area = snapshot.usableAreas.max { a, b in
+                let x = a.intersection(f), y = b.intersection(f)
+                return x.width * x.height < y.width * y.height
+            }
+            if let area, area.intersects(f), f.minY - area.minY < headroom { continue }
             let quad = CGRect(x: f.minX - outward, y: f.minY - outward, width: f.width + 2 * outward,
                               height: outward + wrap)
             let covering = fronts(of: quad, before: index)
             if covering.contains(where: { Self.roundedContains($0, quad) }) { continue }
-            patches.append(Patch(kind: .window, quad: quad, base: f, seed: window.id, age: window.stationarySeconds,
-                                 fronts: covering))
-        }
-        for (number, area) in snapshot.usableAreas.enumerated() {
-            for kind in [Patch.Kind.bottomLeft, .bottomRight] {
-                let x = kind == .bottomLeft ? area.minX : area.maxX - cornerSize.width
-                let quad = CGRect(x: x, y: area.maxY - cornerSize.height, width: cornerSize.width, height: cornerSize.height)
-                let covering = fronts(of: quad, before: windows.count)
-                if covering.contains(where: { Self.roundedContains($0, quad) }) { continue }
-                patches.append(Patch(kind: kind, quad: quad, base: area, seed: UInt32(number * 2 + kind.rawValue) &+ 0x9E37,
-                                     age: snapshot.desktopSeconds, fronts: covering))
-            }
+            patches.append(Patch(quad: quad, base: f, seed: window.id, age: window.stationarySeconds, fronts: covering))
         }
         return patches
     }
@@ -224,11 +228,11 @@ public final class Moss: Effect {
             let age = patch.age * speed
             return Instance(quad: pixels(patch.quad), base: pixels(patch.base),
                             info: SIMD4(Float(patch.seed % 65536), Float(Self.growth(age: age)),
-                                        Float(patch.kind.rawValue), Float(min(patch.fronts.count, Self.frontCapacity))),
+                                        0, Float(min(patch.fronts.count, Self.frontCapacity))),
                             extra: SIMD4(Float(age.isFinite ? min(age, 1e7) : 0),
                                          // Along the edge: the bottom-right corner runs right to left.
-                                         Float((wind.map { Self.lean($0, at: patch.quad) } ?? 0) * (patch.kind == .bottomRight ? -1 : 1)),
-                                         0, 0),
+                                         Float(wind.map { Self.lean($0, at: patch.quad) } ?? 0),
+                                         Float(Self.lateGrowth(age: age)), 0),
                             fronts: (fronts[0], fronts[1], fronts[2], fronts[3], fronts[4], fronts[5], fronts[6], fronts[7],
                                      fronts[8], fronts[9], fronts[10], fronts[11], fronts[12], fronts[13], fronts[14], fronts[15]))
         }

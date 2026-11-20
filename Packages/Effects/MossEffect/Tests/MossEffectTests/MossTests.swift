@@ -24,10 +24,9 @@ struct MossTests {
         #expect(Moss.growth(age: .nan) == 0)
     }
 
-    @Test func onePatchPerWindowAndTwoCorners() {
+    @Test func onePatchPerWindowAndNoneInTheScreenCorners() {
         let patches = Moss.patches(snapshot([window(1, CGRect(x: 100, y: 100, width: 600, height: 400))]))
-        #expect(patches.filter { $0.kind == .window }.count == 1)
-        #expect(patches.filter { $0.kind != .window }.count == 2)
+        #expect(patches.count == 1)
         let band = patches[0]
         // Out 20 points above the top, and down the sides as far as the corners wrap.
         #expect(band.quad == CGRect(x: 80, y: 80, width: 640, height: 48))
@@ -45,6 +44,22 @@ struct MossTests {
         let front = window(2, CGRect(x: 0, y: 0, width: 1280, height: 720), role: .occluder)
         let patches = Moss.patches(snapshot([front, window(1, CGRect(x: 100, y: 100, width: 600, height: 400))]))
         #expect(patches.isEmpty)
+    }
+
+    /// A window pushed up under the menu bar grows nothing: its cushions would be cut off.
+    @Test func noMossRightUnderTheTopOfTheScreen() {
+        let high = window(1, CGRect(x: 100, y: 10, width: 600, height: 400))
+        #expect(Moss.patches(snapshot([high])).isEmpty)
+        let low = window(2, CGRect(x: 100, y: 14, width: 600, height: 400))
+        #expect(Moss.patches(snapshot([low])).count == 1)
+    }
+
+    /// A second display above the first: a window on it is measured against its own top.
+    @Test func headroomOnTheWindowsOwnDisplay() {
+        let upper = CGRect(x: 0, y: -1440, width: 2560, height: 1440)
+        let snap = WindowSnapshot(frontToBack: [window(1, CGRect(x: 100, y: -1200, width: 600, height: 400))],
+                                  layoutRevision: 1, usableAreas: [display, upper], desktopSeconds: 7200)
+        #expect(Moss.patches(snap).count == 1)
     }
 
     /// Dew on a still morning (M3-PLAN 5.3): low in the east only, and less under rain.

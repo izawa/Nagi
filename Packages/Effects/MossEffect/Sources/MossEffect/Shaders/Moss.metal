@@ -10,9 +10,10 @@ using namespace metal;
 
 struct Instance {
     float4 quad;    // pixels
-    float4 base;    // the window, or the usable area for a screen corner (pixels)
-    float4 info;    // seed, growth 0…1, kind (0 window, 1 bottom-left, 2 bottom-right), fronts
-    float4 extra;   // the window's age in seconds (at the chosen speed), the wind's lean −1…1
+    float4 base;    // the window (pixels)
+    float4 info;    // seed, growth 0…1, (unused), fronts
+    float4 extra;   // the window's age in seconds (at the chosen speed), the wind's lean −1…1,
+                    // and the growth after two hours (0 … 1 by four hours)
     float4 fronts[16];
 };
 
@@ -61,6 +62,14 @@ static bool covered(float2 p, constant Instance &patch, float radius) {
     return false;
 }
 
+// Smooth noise, 0…1, a feature about every `size` points.
+static float smoothNoise(float2 p, float size, float seed) {
+    float2 q = p / size, i = floor(q), f = fract(q);
+    f = f * f * (3 - 2 * f);
+    return mix(mix(hash(i, seed), hash(i + float2(1, 0), seed), f.x),
+               mix(hash(i + float2(0, 1), seed), hash(i + float2(1, 1), seed), f.x), f.y);
+}
+
 // Distance from p to the segment from a to b, and how far along it (0…1).
 static float2 segment(float2 p, float2 a, float2 b) {
     float2 ab = b - a;
@@ -73,88 +82,81 @@ static float2 segment(float2 p, float2 a, float2 b) {
 struct Frame {
     float s;          // along the edge, points
     float d;          // out from it, points (negative over the window)
-    bool corner;      // round an upper corner or down a side, or a screen corner
+    bool corner;      // round an upper corner or down a side
     float stop;       // 1, falling to 0 where moss stops a little way round a window's upper corner
+    float straight;   // the length of the straight top, points
 };
 
-// A window: s is 0 where the straight top begins, less round the left corner and down its side,
-// more round the right. A screen corner: s runs along the bottom (positive) and up the side
-// (negative), and d is how far into the screen.
+// s is 0 where the window's straight top begins, less round the left corner and down its side,
+// more round the right.
 static Frame edgeFrame(float2 p, constant Instance &patch, constant Uniforms &u) {
     float4 b = patch.base / u.scale;
-    if (int(patch.info.z) == 0) {
-        float r = u.cornerRadius, straight = b.z - b.x - 2 * r;
-        float d = roundedBox(p, b, r);
-        float2 left = b.xy + r, right = float2(b.z - r, b.y + r);
-        float s;
-        if (p.x < left.x) {
-            float2 v = p - left;
-            s = p.y > left.y ? -M_PI_F * r / 2 - (p.y - left.y) : -r * atan2(-v.x, -v.y);
-        } else if (p.x > right.x) {
-            float2 v = p - right;
-            s = p.y > right.y ? straight + M_PI_F * r / 2 + (p.y - right.y) : straight + r * atan2(v.x, -v.y);
-        } else {
-            s = p.x - left.x;
-        }
-        // Round the corner, not down the side (the author's mark at stop J0): the cushion keeps
-        // its thickness and ends in a rounded cap over the last few points, so it does not thin
-        // into a strand that reads as part of the window's frame.
-        float end = M_PI_F * r / 2 * 0.85, cap = 6;
-        float2 x = saturate(float2(s + end, straight + end - s) / cap);
-        float stop = sqrt(1 - (1 - x.x) * (1 - x.x)) * sqrt(1 - (1 - x.y) * (1 - x.y));
-        return Frame{s, d, s < 0 || s > straight, stop};
+    float r = u.cornerRadius, straight = b.z - b.x - 2 * r;
+    float d = roundedBox(p, b, r);
+    float2 left = b.xy + r, right = float2(b.z - r, b.y + r);
+    float s;
+    if (p.x < left.x) {
+        float2 v = p - left;
+        s = p.y > left.y ? -M_PI_F * r / 2 - (p.y - left.y) : -r * atan2(-v.x, -v.y);
+    } else if (p.x > right.x) {
+        float2 v = p - right;
+        s = p.y > right.y ? straight + M_PI_F * r / 2 + (p.y - right.y) : straight + r * atan2(v.x, -v.y);
+    } else {
+        s = p.x - left.x;
     }
-    float2 corner = float2(int(patch.info.z) == 1 ? b.x : b.z, b.w);
-    float along = abs(p.x - corner.x), up = corner.y - p.y;
-    return up < along ? Frame{along, up, true, 1} : Frame{-up, along, true, 1};
+    // Round the corner, not down the side (the author's mark at stop J0): the cushion keeps
+    // its thickness and ends in a rounded cap over the last few points, so it does not thin
+    // into a strand that reads as part of the window's frame.
+    float end = M_PI_F * r / 2 * 0.85, cap = 6;
+    float2 x = saturate(float2(s + end, straight + end - s) / cap);
+    float stop = sqrt(1 - (1 - x.x) * (1 - x.x)) * sqrt(1 - (1 - x.y) * (1 - x.y));
+    return Frame{s, d, s < 0 || s > straight, stop, straight};
 }
 
 // MARK: - Colonies
 
 struct Colony {
-    float reach;    // the growth at which moss arrives here; > 1 where it never does
+    float reach;    // when moss arrives here, on the growth clock T (0 … 2); > 2 where it never does
     float inside;   // points behind the colony's growing front (negative ahead of it)
-    float age;      // growth since the colony started
-    float spread;   // how far out along the edge this place is, 0 at the start … 1 at full reach
-    float rival;    // the next colony's reach here: where two meet, a crease
+    float age;      // T since moss arrived here: how long this spot has had to grow up
+    float spread;   // how far out along the edge this place is, 0 at the start … 1 at two hours' reach
+    float rival;    // the next colony's arrival here: where two meet, a crease
     float start;    // the growth at which the colony first showed
     float species;  // 0 needle tufts, 1 rounded domes, 2 fine upright blades
     float seed;
 };
 
 // A colony starting at s0 that first shows at growth b and spreads radiusLeft/Right points along
-// the edge: farther places need more growth (M3-LOG stage B0).
+// the edge by two hours, half as far again by four (the author at stops J0 and K). `growth` is
+// the growth clock T: 0 … 1 over the first two hours, 1 … 2 over the next two.
 static void consider(thread Colony &best, float s, float s0, float b, float radiusLeft, float radiusRight,
                      float species, float seed, float growth) {
     if (growth <= b) return;   // not started yet: no stray leaves where it will
-    float x = s - s0, radius = x < 0 ? radiusLeft : radiusRight;
-    float a = abs(x) / radius;
-    if (a > 1) return;
-    float reach = b + (1 - b) * a * a;
+    float x = abs(s - s0), radius = s < s0 ? radiusLeft : radiusRight;
+    float a = x / radius;
+    if (a > 1.5) return;
+    // Farther places later: within the first reach by two hours, the rest by four.
+    float reach = a <= 1 ? b + (1 - b) * a * a : 1 + 2 * (a - 1);
     if (reach >= best.reach) {
         best.rival = min(best.rival, reach);
         return;
     }
-    float front = growth > b ? radius * sqrt(min((growth - b) / (1 - b), 1.0)) : 0;
-    best = Colony{reach, front - abs(x), growth - b, a, best.reach, b, species, seed};
+    float front = growth < 1 ? radius * sqrt(saturate((growth - b) / (1 - b))) : radius * (1 + 0.5 * (growth - 1));
+    best = Colony{reach, front - x, growth - reach, a, best.reach, b, species, seed};
 }
 
 // The colony that has, or will first have, the moss at s.
 static Colony colonyAt(float s, constant Instance &patch, constant Uniforms &u) {
-    float seed = patch.info.x, g = patch.info.y;
-    Colony best = {2, -1e3, 0, 1, 2, 0, 0, 0};
-    if (int(patch.info.z) != 0) {
-        consider(best, s, 0, 0, 55, 65, floor(hash(float2(9, 1), seed) * 3), seed + 201, g);
-        return best;
-    }
+    float seed = patch.info.x, g = patch.info.y + patch.extra.z;
+    Colony best = {3, -1e3, 0, 1, 3, 0, 0, 0};
     // One start in about two thirds of the 96-point stretches of the top; the upper corners
     // always have one, and they come first.
-    float stretch = 96;
-    int k = int(floor(s / stretch));
+    float span = 96;
+    int k = int(floor(s / span));
     for (int i = k - 1; i <= k + 1; i++) {
         float2 id = float2(i, 1);
         if (hash(id, seed) > 0.67) continue;
-        float s0 = (i + 0.5 + (hash(id + 2, seed) - 0.5) * 0.5) * stretch;
+        float s0 = (i + 0.5 + (hash(id + 2, seed) - 0.5) * 0.5) * span;
         consider(best, s, s0, 0.05 + hash(id + 3, seed) * 0.2, 35 + 30 * hash(id + 4, seed),
                  35 + 30 * hash(id + 5, seed), floor(hash(id + 6, seed) * 3), seed + i, g);
     }
@@ -168,26 +170,27 @@ static Colony colonyAt(float s, constant Instance &patch, constant Uniforms &u) 
 
 // The cushion's cross-section: low, its crest just outside the edge. Height 0…1 at d for a
 // colony this mature.
-static float reachOut(float species, bool corner, constant Uniforms &u) {
-    return (species < 0.5 ? 13 : species < 1.5 ? 12 : 9) * (corner ? 1.25 : 1) * u.spread;
+// How far out a mature cushion reaches, points. Past two hours it thickens a little more (a fifth
+// by four hours: taller, and the sporophytes would sink into it).
+static float reachOut(float species, bool corner, constant Uniforms &u, float late) {
+    return (species < 0.5 ? 10.5 : species < 1.5 ? 12 : 9) * (corner ? 1.25 : 1) * u.spread * (1 + 0.2 * late);
 }
 
-static float profile(float d, float maturity, float species, bool corner, constant Uniforms &u) {
-    float out = reachOut(species, corner, u) * maturity;
+static float profile(float d, float maturity, float species, bool corner, constant Uniforms &u, float late) {
+    float out = reachOut(species, corner, u, late) * maturity;
     float in = min(3.0, u.inward) * u.spread * maturity;
     float crest = out * 0.25;
     float t = d > crest ? (d - crest) / max(out - crest, 1e-3) : (crest - d) / max(crest + in, 1e-3);
     return t < 1 ? sqrt(1 - t * t) : 0;
 }
 
-// How grown the colony is here: rounded shoulders over the last 10 points to the growing front,
-// and a colony that rises over its first stretch of growth, then stays low while it spreads.
+// How grown the colony is here. Each spot grows up from the time moss reached it (the author at
+// stop K): thin where it has just spread to, full height about an hour and a half of growth later, so the
+// colony rises from where it started outwards and its ends are still low when growth stops.
 static float maturity(Colony colony, Frame f) {
-    // Oldest, and so fullest, where it started; lower towards where it spread to.
-    float mound = 0.7 + 0.3 * (1 - colony.spread * colony.spread);
     // Where two colonies meet they press together: a shallow crease.
     float crease = 0.2 + 0.8 * smoothstep(0.0, 0.25, colony.rival - colony.reach);
-    return smoothstep(-1.0, 12.0, colony.inside) * smoothstep(0.0, 0.3, colony.age) * mound * crease * f.stop;
+    return smoothstep(-1.0, 3.0, colony.inside) * (0.08 + 0.92 * smoothstep(0.0, 0.8, colony.age)) * crease * f.stop;
 }
 
 // MARK: - Leaves
@@ -284,8 +287,8 @@ static Leaves blades(float2 q, float top, float seed) {
 
 // Sporophytes on a grown-up colony (タマゴケ): a fine reddish-brown stalk with a small round
 // brown capsule, rising as nagi deepens. Returns coverage (0…1) and writes the colour.
-static float sporophytes(float2 q, float bed, float plenty, float rise, float limit, float sway, float seed,
-                         thread float3 &colour) {
+static float sporophytes(float2 q, float bed, float plenty, float rise, float limit, float sway, float straight,
+                         float seed, thread float3 &colour) {
     float spacing = 5.5;
     float k = floor(q.x / spacing);
     float cover = 0;
@@ -293,14 +296,16 @@ static float sporophytes(float2 q, float bed, float plenty, float rise, float li
         float c = k + i;
         if (hash(float2(c, 31), seed) > plenty) continue;
         float2 base = float2((c + 0.5 + (hash(float2(c, 32), seed) - 0.5) * 0.7) * spacing, bed);
+        // Whole stalks only, rooted on the straight top (they stand straight up there).
+        if (base.x < 3 || base.x > straight - 3) continue;
         // The capsule (0.6 + 1.1 points past the tip) stays within the limit too.
-        float tall = min((4.5 + 3.5 * hash(float2(c, 33), seed)) * (0.35 + 0.65 * rise), limit - 1.8 - bed);
-        float lean = (hash(float2(c, 34), seed) - 0.5) * 1.2;
-        // Leaning with the wind, the taller the more (D19).
-        float2 tip = base + float2(lean + sway * tall * 0.3, tall);
+        // All about as tall, all upright (the author at stop K): only the wind leans them, the
+        // taller the more (D19).
+        float tall = min(9.0 * (0.96 + 0.08 * hash(float2(c, 33), seed)) * (0.35 + 0.65 * rise), limit - 1.8 - bed);
+        float2 tip = base + float2(sway * tall * 0.3, tall);
         float2 st = segment(q, base, tip);
-        // The stalk bows a little: offset by a curve along it.
-        float2 bow = float2(0.4 * lean * st.y * (1 - st.y), 0);
+        // Bent by the wind, the stalk bows a little: offset by a curve along it.
+        float2 bow = float2(0.4 * sway * tall * 0.3 * st.y * (1 - st.y), 0);
         st = segment(q - bow, base, tip);
         if (st.x < 0.26) {
             float a = saturate((0.26 - st.x) / 0.1);
@@ -325,7 +330,7 @@ static float heightAt(float2 p, constant Instance &patch, constant Uniforms &u) 
     float bump = 0;
     if (colony.species > 0.5 && colony.species < 1.5) domes(float2(f.s, f.d), colony.seed, bump);
     float tuft = colony.species > 0.5 && colony.species < 1.5 ? 0.75 + 0.35 * bump : 0.85 + 0.3 * tufts(f.s, colony.seed);
-    return profile(f.d / tuft, m, colony.species, f.corner, u) * m;
+    return profile(f.d / tuft, m, colony.species, f.corner, u, patch.extra.z) * m;
 }
 
 fragment float4 mossFragment(Out in [[stage_in]], constant Instance *instances [[buffer(0)]],
@@ -334,17 +339,15 @@ fragment float4 mossFragment(Out in [[stage_in]], constant Instance *instances [
     float2 pixel = in.position.xy;
     float radius = u.cornerRadius * u.scale;
     if (covered(pixel, patch, radius)) discard_fragment();
-    if (int(patch.info.z) == 0) {
-        // No moss without a root: the edge it grows from must be in sight.
-        // Round a corner, the root is on the curve: towards the corner's centre from the pixel.
-        float4 b = patch.base;
-        float2 centre = float2(clamp(pixel.x, b.x + radius, b.z - radius), b.y + radius);
-        float2 root = pixel.y < centre.y && pixel.x != centre.x
-            ? centre + normalize(pixel - centre) * (radius - u.scale)
-            : float2(pixel.x, b.y + u.scale);
-        if (pixel.y >= centre.y) root = float2(clamp(pixel.x, b.x + u.scale, b.z - u.scale), pixel.y);
-        if (covered(root, patch, radius)) discard_fragment();
-    }
+    // No moss without a root: the edge it grows from must be in sight. Round a corner, the root
+    // is on the curve: towards the corner's centre from the pixel.
+    float4 b = patch.base;
+    float2 centre = float2(clamp(pixel.x, b.x + radius, b.z - radius), b.y + radius);
+    float2 root = pixel.y < centre.y && pixel.x != centre.x
+        ? centre + normalize(pixel - centre) * (radius - u.scale)
+        : float2(pixel.x, b.y + u.scale);
+    if (pixel.y >= centre.y) root = float2(clamp(pixel.x, b.x + u.scale, b.z - u.scale), pixel.y);
+    if (covered(root, patch, radius)) discard_fragment();
     float2 p = pixel / u.scale;
     Frame f = edgeFrame(p, patch, u);
     Colony colony = colonyAt(f.s, patch, u);
@@ -357,11 +360,11 @@ fragment float4 mossFragment(Out in [[stage_in]], constant Instance *instances [
     Leaves l = colony.species > 0.5 && colony.species < 1.5 ? domes(q, colony.seed, bump) : Leaves{0, 0, 0, 0};
     // The top's outline: rounded domes, or small tufts; never a ruled line.
     float tuft = colony.species > 0.5 && colony.species < 1.5 ? 0.75 + 0.35 * bump : 0.85 + 0.3 * tufts(f.s, colony.seed);
-    float h = profile(f.d / tuft, m, colony.species, f.corner, u) * m;
+    float h = profile(f.d / tuft, m, colony.species, f.corner, u, patch.extra.z) * m;
     float3 low, mid, light;
     if (colony.species < 0.5) {
         // Needle tips reach a little past the cushion.
-        float fringe = profile((f.d - 1.5) / tuft, max(m, 0.15), colony.species, f.corner, u);
+        float fringe = profile((f.d - 1.5) / tuft, max(m, 0.15), colony.species, f.corner, u, patch.extra.z);
         l = h > 0 || fringe > 0 ? needles(q, colony.seed) : Leaves{0, 0, 0, 0};
         float body = smoothstep(0.0, 0.25, h);   // dense below the needles
         l.cover = max(l.cover, body * 0.9);
@@ -372,7 +375,7 @@ fragment float4 mossFragment(Out in [[stage_in]], constant Instance *instances [
         l.cover = smoothstep(0.0, 0.12, h);
         low = float3(0.030, 0.090, 0.040); mid = float3(0.110, 0.270, 0.110); light = float3(0.300, 0.470, 0.240);
     } else {
-        float top = reachOut(colony.species, f.corner, u) * m * tuft + 1;
+        float top = reachOut(colony.species, f.corner, u, patch.extra.z) * m * tuft + 1;
         l = blades(q, top, colony.seed);
         // Packed below: the blades' lower parts hide what is behind.
         float packed = (1 - smoothstep(top * 0.35, top * 0.7, f.d)) * step(-1.5, f.d) * smoothstep(0.0, 0.15, m);
@@ -385,14 +388,15 @@ fragment float4 mossFragment(Out in [[stage_in]], constant Instance *instances [
     // later than others), more of them over the next half hour (the author's idea at stop J0).
     float3 sporeColour = float3(0);
     float spore = 0;
-    if (colony.species < 0.5) {
+    // Only along the straight top, so every sporophyte stands straight up.
+    if (colony.species < 0.5 && f.s > -4 && f.s < f.straight + 4) {
         float start = 600 + 6600 * sqrt(colony.start / 3);
         float adultAt = start + 3600 + 1800 * hash(float2(41, 1), colony.seed);
         float plenty = 0.8 * smoothstep(adultAt, adultAt + 1800, patch.extra.x) * (1 - smoothstep(0.4, 0.75, colony.spread)) * smoothstep(0.5, 0.9, f.stop);
         if (plenty > 0) {
-            float bed = reachOut(colony.species, f.corner, u) * m * tuft * 0.55;
+            float bed = reachOut(colony.species, f.corner, u, patch.extra.z) * m * tuft * 0.55;
             spore = sporophytes(q, bed, plenty, smoothstep(20.0, 120.0, u.depth), 19.5 * u.spread, patch.extra.y,
-                                colony.seed, sporeColour);
+                                f.straight, colony.seed, sporeColour);
         }
     }
     if (l.cover <= 0 && spore <= 0) discard_fragment();
@@ -407,6 +411,12 @@ fragment float4 mossFragment(Out in [[stage_in]], constant Instance *instances [
     float3 colour = mix(low, mid, saturate(h * 1.2 + bump * 0.3));
     colour = mix(colour, light, l.tip * 0.85);
     colour *= (0.55 + 0.75 * sky) * (1 - 0.45 * l.shade);
+    // No two places quite alike (the author at stop K): patches a little lighter or darker, a
+    // little yellower or bluer, over a few points and over ten or more, and each colony its own.
+    float patchy = smoothNoise(q, 6.0, colony.seed + 61) * 0.4 + smoothNoise(q, 20.0, colony.seed + 62) * 0.6;
+    float hue = (smoothNoise(q, 14.0, colony.seed + 63) - 0.5) * 1.4 + (hash(float2(64, 1), colony.seed) - 0.5) * 0.8;
+    colour *= 0.62 + 0.75 * smoothstep(0.15, 0.85, patchy);
+    colour *= float3(1 + 0.45 * hue, 1 + 0.05 * hue, 1 - 0.45 * hue);
     // Wet: deeper, and the clear leaves glint (D32).
     float wet = u.precipitation;
     colour *= mix(1.0, 0.7, wet);
@@ -420,7 +430,7 @@ fragment float4 mossFragment(Out in [[stage_in]], constant Instance *instances [
         for (int i = -1; i <= 1; i++) {
             float c = k + i;
             if (hash(float2(c, 51), colony.seed) > 0.3) continue;
-            float edge = reachOut(colony.species, f.corner, u) * m * tuft;
+            float edge = reachOut(colony.species, f.corner, u, patch.extra.z) * m * tuft;
             float2 bead = float2((c + 0.5 + (hash(float2(c, 52), colony.seed) - 0.5) * 0.6) * cell,
                                  edge * (0.6 + 0.25 * hash(float2(c, 53), colony.seed)));
             float r = length(q - bead) / 0.5;
