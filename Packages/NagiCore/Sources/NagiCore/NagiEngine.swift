@@ -113,7 +113,8 @@ import QuartzCore
     /// While nagi does not show, the windows' ages are kept up every 30 seconds (DECISIONS D32).
     private var windowPolling: Timer?
     private static let windowPollingInterval = 30.0
-    /// Readings a second while nagi shows; set from stage A2's measurements (M3-PLAN 3.4).
+    /// Readings a second while nagi shows: 0.5 % CPU at 5, and new windows follow within 0.2 s
+    /// (the author's choice at stop I, M3-LOG).
     public var windowReadingsPerSecond = 5.0
     /// Debug: multiplies every window's age (M3-PLAN 3.3).
     public var windowAgeScale: Double {
@@ -321,6 +322,9 @@ import QuartzCore
     /// Follows the running effects: what draws, the clouds they ask for, whether to capture.
     private func applyRunning() {
         renderer.disabledIDs = Set(renderer.effectIDs).subtracting(running)
+        // The cached frame carries what the old set shared (its rain): the next display to draw
+        // makes a new one.
+        frame = nil
         let descriptors = renderer.descriptors.filter { running.contains($0.id) }
         weather.cloudBias = descriptors.compactMap { $0.weatherHint?.cloudBias }.reduce(0, +)
         needsBackdrop = descriptors.contains { $0.capabilities.contains(.backdrop) }
@@ -506,13 +510,12 @@ import QuartzCore
             if needsWindows, output.phase != .leaving, now - windowsAskedAt >= 1 / windowReadingsPerSecond {
                 readWindows(.visible)
             }
-            frame = FrameState(
+            frame = renderer.update(FrameState(
                 time: now, deltaTime: deltaTime, date: date, phase: output.phase.framePhase,
                 presence: output.presence, depth: shownDepth, appearance: Self.appearance,
                 accessibility: accessibility, seed: 1, environment: environment(at: date),
                 displays: overlays.overlays.values.map(\.view.frameInDesktop), showing: showings,
-                windows: needsWindows ? windows.snapshot : nil)
-            renderer.update(frame)
+                windows: needsWindows ? windows.snapshot : nil))
             self.frame = frame
         } else {
             var latest = self.frame!

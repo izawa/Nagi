@@ -108,6 +108,14 @@ public final class Rain: Effect {
         trailPipeline = try make("trailVertex", "trailFragment")
     }
 
+    /// How hard it rains: the share of the glass drops cover, against a downpour's (D32). The
+    /// same curve the drops follow, so the wet comes with the rain, not with counting drops.
+    public static func precipitation(_ frame: FrameState) -> Double {
+        let intensity = bounded(frame.number("intensity", default: 1), key: "intensity")
+        let depth = frame.depth.isFinite ? min(max(frame.depth, 0), 600) : 0
+        return Drops.coverage(depth: depth, intensity: intensity) / Drops.maximumCoverage
+    }
+
     public func update(_ frame: FrameState) {
         // Within the declared ranges (nagi-render passes --param values as they are).
         let intensity = Self.bounded(frame.number("intensity", default: 1), key: "intensity")

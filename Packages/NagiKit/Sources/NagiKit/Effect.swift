@@ -23,10 +23,16 @@ public protocol Effect: AnyObject {
     /// place (komorebi after sunset), so "see it now" showing nothing is not mistaken for a fault.
     /// Nil when it shows as usual.
     static func note(_ frame: FrameState) -> LocalizedStringResource?
+
+    /// How hard this effect makes it rain at `frame`, 0 … 1 (its own parameters and depth). The
+    /// core shares the largest as `SharedEnvironment.precipitation`, so other effects can get
+    /// wet without knowing this one (DECISIONS D32). 0 for effects that bring no rain.
+    static func precipitation(_ frame: FrameState) -> Double
 }
 
 extension Effect {
     public static func note(_ frame: FrameState) -> LocalizedStringResource? { nil }
+    public static func precipitation(_ frame: FrameState) -> Double { 0 }
 }
 
 /// What the core lends an effect at creation.

@@ -15,7 +15,7 @@ import UniformTypeIdentifiers
         let base = try background.makeTexture(size: size, renderer: self)
         let screen = try makeTexture(size: size, storage: .shared)
         guard let commandBuffer = queue.makeCommandBuffer() else { throw NagiCoreError("no command buffer") }
-        update(frame)
+        let frame = update(frame)
         try encodeScreen(frame, view: view, strength: strength, background: base, into: screen, commandBuffer: commandBuffer)
         commandBuffer.commit()
         commandBuffer.waitUntilCompleted()
@@ -31,7 +31,7 @@ import UniformTypeIdentifiers
         // `.backdrop` effects see the background, as in `renderOffscreen`.
         var view = view
         if view.backdrop == nil, let background { view.backdrop = try background.makeTexture(size: view.pixelSize, renderer: self) }
-        update(frame)
+        let frame = update(frame)
         try encode(frame, view: view, strength: strength, into: overlay, commandBuffer: commandBuffer)
         commandBuffer.commit()
         commandBuffer.waitUntilCompleted()

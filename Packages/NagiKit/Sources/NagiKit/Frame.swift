@@ -98,6 +98,9 @@ public struct SharedEnvironment: Sendable {
     /// 0 … 1: how much of the direct sun a cloud takes away now. Effects lose their direct light,
     /// not their brightness: the light that remains comes from the whole sky (DECISIONS D20).
     public var sunOcclusion = 0.0
+    /// 0 … 1: how hard it rains in the picture now, from the effects that draw rain (their
+    /// `Effect.precipitation`); things that get wet follow it (DECISIONS D32).
+    public var precipitation = 0.0
     public var wind = Wind()
     public init() {}
 }

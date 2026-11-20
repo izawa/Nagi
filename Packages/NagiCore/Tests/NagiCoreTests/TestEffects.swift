@@ -97,3 +97,14 @@ final class BackdropProbe: Effect {
 
     var sampled: SIMD4<Float> { sample.contents().load(as: SIMD4<Float>.self) }
 }
+
+/// Makes it rain as hard as its "rain" parameter says, and records the precipitation it was given.
+final class RainProbe: Effect {
+    static let descriptor = EffectDescriptor(id: "test.rain", displayName: "Rain", summary: "Test", layer: .glass)
+    static func precipitation(_ frame: FrameState) -> Double { frame.number("rain", default: 0) }
+    private(set) var seen: Double?
+    init(context: EffectContext) throws {}
+    func update(_ frame: FrameState) { seen = frame.environment.precipitation }
+    func render(_ frame: FrameState, view: DisplayView, encoder: any EffectEncoder) throws {}
+    func releaseResources() {}
+}

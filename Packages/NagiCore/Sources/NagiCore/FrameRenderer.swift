@@ -56,8 +56,16 @@ import NagiKit
             .compactMap { type(of: $0.instance).note(frame.with($0.descriptor, parameters)) }
     }
 
-    public func update(_ frame: FrameState) {
+    /// Fills in what the running effects share (the rain they make), advances them, and returns
+    /// the frame to draw with: `encode` must get this one.
+    public func update(_ frame: FrameState) -> FrameState {
+        var frame = frame
+        frame.environment.precipitation = running.map {
+            let value = type(of: $0.instance).precipitation(frame.with($0.descriptor, parameters))
+            return value.isNaN ? 0 : min(max(value, 0), 1)
+        }.max() ?? 0
         for effect in running { effect.instance.update(frame.with(effect.descriptor, parameters)) }
+        return frame
     }
 
     /// Encodes one display's frame into `target` (the live drawable or an offscreen texture):

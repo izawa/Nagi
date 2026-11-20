@@ -1,4 +1,5 @@
 import CoreGraphics
+import NagiKit
 import simd
 import Testing
 @testable import RainEffect
@@ -9,6 +10,19 @@ struct DropsTests {
 
     func covered(_ drops: [Drop]) -> Double {
         drops.reduce(0) { $0 + $1.area } / Double(display.width * display.height)
+    }
+
+    /// What rain tells the core (D32): from a sprinkle at first to a downpour at two minutes.
+    @Test func precipitationFollowsTheCoverage() {
+        func rain(depth: Double, intensity: Double) -> Double {
+            Rain.precipitation(FrameState(time: 0, deltaTime: 0, date: .distantPast, phase: .calm, presence: 1,
+                                          depth: depth, appearance: .light, parameters: ["intensity": .number(intensity)],
+                                          seed: 1))
+        }
+        #expect(rain(depth: 0, intensity: 1) < 0.05)
+        #expect(abs(rain(depth: 120, intensity: 1) - 1) < 1e-9)
+        #expect(rain(depth: 120, intensity: 0.5) < 0.6)
+        #expect(rain(depth: 120, intensity: 1.5) == 1)
     }
 
     @Test func sameInputsSameDrops() {

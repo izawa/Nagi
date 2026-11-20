@@ -44,6 +44,21 @@ import Testing
         #expect(abs(right.x - 0.25) < 1e-3 && abs(right.w - 0.25) < 1e-3)
     }
 
+    /// Effects share the rain they make (D32): the largest, clamped, and none from effects not
+    /// running in the showing.
+    @Test func precipitationIsSharedFromRunningEffects() throws {
+        let renderer = try FrameRenderer(device: device, effects: [RainProbe.self, SurfacePatch.self])
+        renderer.parameters = ["test.rain": ["rain": .number(0.4)]]
+        #expect(renderer.update(frame()).environment.precipitation == 0.4)
+        #expect(renderer.instance(of: RainProbe.self)?.seen == 0.4)
+        renderer.parameters = ["test.rain": ["rain": .number(3)]]
+        #expect(renderer.update(frame()).environment.precipitation == 1)
+        renderer.parameters = ["test.rain": ["rain": .number(.nan)]]
+        #expect(renderer.update(frame()).environment.precipitation == 0)
+        renderer.disabledIDs = ["test.rain"]
+        #expect(renderer.update(frame()).environment.precipitation == 0)
+    }
+
     /// The measured WindowServer blend (SPEC 3.5): black at α 0.08 lowers the encoded value by 8 %,
     /// and colour at α 0 adds nothing.
     @Test func desktopBlendMatchesTheMeasuredModel() throws {
