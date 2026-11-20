@@ -31,13 +31,20 @@ public final class Rain: Effect {
             ParameterSpec(key: "fresnel", label: "空の映り込み", kind: .slider(range: 0...1, defaultValue: 0.35)),
             ParameterSpec(key: "highlight", label: "ハイライト", kind: .slider(range: 0...2, defaultValue: 1)),
             ParameterSpec(key: "shadow", label: "粒の影", kind: .slider(range: 0...0.5, defaultValue: 0.18)),
+            // 1.33 darkens the film's edges by up to 10 % (1 by 7.5 %); the flash checks (SPEC 2.2)
+            // were run at 1.33.
+            ParameterSpec(key: "trail", label: "航跡の濃さ", kind: .slider(range: 0...2, defaultValue: 1.33)),
+            // The whole screen darker in a downpour (α of black; less as it rains less). Rain's own
+            // gloom: clouds do not darken the screen (D20). Users set up to 0.10 (10 % darker).
+            ParameterSpec(key: "gloom", label: localized("雨の暗さ"), kind: .slider(range: 0...0.15, defaultValue: 0.07),
+                          user: .slider(0...0.10)),
         ],
         weatherHint: WeatherHint(cloudBias: 0.4))
 
     /// Per drop, for the shader: centre and reach in pixels, and the outline's seed; then each
     /// lobe's offset and radius in pixels (radius 0: no lobe). The first lobe's last value is the
-    /// drop's speed in points per second; the second's, how fast it went over the last step
-    /// (RainSimulation.pace), for the motion blur.
+    /// drop's speed in points per second; the second's, the points it went over the frame
+    /// (RainSimulation.travel), for the motion blur.
     struct Instance {
         var geometry: SIMD4<Float>
         var lobes: (SIMD4<Float>, SIMD4<Float>, SIMD4<Float>, SIMD4<Float>)
@@ -50,8 +57,11 @@ public final class Rain: Effect {
         var look: SIMD4<Float>
         /// refraction, presence, appearance (0 light, 1 dark), sky brightness
         var misc: SIMD4<Float>
-        /// The output's size in pixels, pixels per point, and the frame's length in seconds.
+        /// The output's size in pixels, and pixels per point.
         var target: SIMD4<Float>
+        /// How dark the wet trail's edges are (the "trail" parameter), and the α of black over the
+        /// whole screen for the rain's gloom.
+        var shade: SIMD4<Float>
     }
 
     /// A piece of wet trail, for the shader: its two ends in pixels, then its half-width in
@@ -63,6 +73,7 @@ public final class Rain: Effect {
 
     private let pipeline: any MTLRenderPipelineState
     private let trailPipeline: any MTLRenderPipelineState
+    private let gloomPipeline: any MTLRenderPipelineState
     private let device: any MTLDevice
     private var simulation: RainSimulation?
     /// The frame time the simulation was last moved to: it follows the scene's clock, so a paused
@@ -97,16 +108,18 @@ public final class Rain: Effect {
     public init(context: EffectContext) throws {
         device = context.device
         let library = try context.device.makeDefaultLibrary(bundle: Bundle.module)
-        func make(_ vertex: String, _ fragment: String) throws -> any MTLRenderPipelineState {
+        func make(_ vertex: String, _ fragment: String, blended: Bool = true) throws -> any MTLRenderPipelineState {
             let descriptor = MTLRenderPipelineDescriptor()
             descriptor.vertexFunction = library.makeFunction(name: vertex)
             descriptor.fragmentFunction = library.makeFunction(name: fragment)
             descriptor.colorAttachments[0].pixelFormat = context.pixelFormat
-            descriptor.colorAttachments[0].usePremultipliedSourceOver()
+            if blended { descriptor.colorAttachments[0].usePremultipliedSourceOver() }
             return try context.device.makeRenderPipelineState(descriptor: descriptor)
         }
         pipeline = try make("dropVertex", "dropFragment")
         trailPipeline = try make("trailVertex", "trailFragment")
+        // It reads what is drawn and writes it back changed: no blending.
+        gloomPipeline = try make("gloomVertex", "gloomFragment", blended: false)
     }
 
     /// How hard it rains: the share of the glass drops cover, against a downpour's (D32). The
@@ -148,15 +161,15 @@ public final class Rain: Effect {
     }
 
     public func render(_ frame: FrameState, view: DisplayView, encoder: any EffectEncoder) throws {
-        // Without the screen behind (no capture yet, or no permission) a drop has nothing to bend.
+        // Without the screen behind (no capture yet, or no permission) a drop has nothing to bend,
+        // and the rain shows nothing, its gloom included (SPEC 3.9).
         guard let backdrop = view.backdrop else { return }
         var uniforms = Self.uniforms(frame)
-        // The frame's length, for the motion blur of running drops (1/60 s when unknown).
-        let frameTime = frame.deltaTime > 0 && frame.deltaTime < 0.1 ? frame.deltaTime : 1.0 / 60
-        uniforms.target = SIMD4(Float(encoder.outputSize.x), Float(encoder.outputSize.y), Float(view.scale), Float(frameTime))
+        uniforms.target = SIMD4(Float(encoder.outputSize.x), Float(encoder.outputSize.y), Float(view.scale), 0)
         let trails = write(trailInstances(for: view), view: view, kind: .trails)
         let drops = write(dropInstances(for: view), view: view, kind: .drops)
-        guard trails != nil || drops != nil else { return }
+        let gloom = uniforms.shade.y > 0
+        guard trails != nil || drops != nil || gloom else { return }
         encoder.renderToOutput { pass in
             pass.setVertexBytes(&uniforms, length: MemoryLayout<Uniforms>.stride, index: 1)
             pass.setFragmentBytes(&uniforms, length: MemoryLayout<Uniforms>.stride, index: 1)
@@ -168,6 +181,11 @@ public final class Rain: Effect {
                 pass.setVertexBuffer(buffer, offset: 0, index: 0)
                 pass.setFragmentBuffer(buffer, offset: 0, index: 0)
                 pass.drawPrimitives(type: .triangleStrip, vertexStart: 0, vertexCount: 4, instanceCount: count)
+            }
+            // Last, the gloom over everything drawn so far, the effects below included.
+            if gloom {
+                pass.setRenderPipelineState(gloomPipeline)
+                pass.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
             }
         }
     }
@@ -183,8 +201,8 @@ public final class Rain: Effect {
         instances.reserveCapacity(simulation.field.slots.count)
         simulation.forEachDrop { drop in
             // A running drop is drawn up to 1.8 times as long, and blurred over a frame's travel.
-            let pace = simulation.pace(of: drop)
-            let extent = drop.reach * 1.6 * 1.8 + pace * 0.1
+            let travel = simulation.travel(of: drop)
+            let extent = drop.reach * 1.6 * 1.8 + travel
             guard drop.center.x + extent >= frame.minX, drop.center.x - extent <= frame.maxX,
                   drop.center.y + extent >= frame.minY, drop.center.y - extent <= frame.maxY else { return }
             func lobe(_ i: Int) -> SIMD4<Float> {
@@ -194,7 +212,7 @@ public final class Rain: Effect {
             }
             var first = lobe(0), second = lobe(1)
             first.w = Float(drop.speed)
-            second.w = Float(pace)
+            second.w = Float(travel)
             let center = (drop.center - origin) * scale
             instances.append(Instance(geometry: SIMD4(Float(center.x), Float(center.y), Float(drop.reach * scale), Float(drop.shape)),
                                       lobes: (first, second, lobe(2), lobe(3))))
@@ -248,7 +266,12 @@ public final class Rain: Effect {
                                 Float(frame.number("highlight", default: 1)), Float(frame.number("shadow", default: 0.18)))
         let misc = SIMD4<Float>(Float(frame.number("refraction", default: 1)), Float(frame.presence),
                                 frame.appearance == .dark ? 1 : 0, Float(0.4 + 0.6 * day))
-        return Uniforms(light: light, look: look, misc: misc, target: .zero)
+        // The gloom follows how hard it rains (the core fades the whole layer with nagi's
+        // presence); half for Increase Contrast or Reduce Transparency (SPEC 2.2).
+        let gloom = bounded(frame.number("gloom", default: 0.07), key: "gloom") * precipitation(frame)
+            * (frame.accessibility.reduceStrength ? 0.5 : 1)
+        let shade = SIMD4<Float>(Float(bounded(frame.number("trail", default: 1.33), key: "trail")), Float(gloom), 0, 0)
+        return Uniforms(light: light, look: look, misc: misc, target: .zero, shade: shade)
     }
 }
 

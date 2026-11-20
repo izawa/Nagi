@@ -30,8 +30,10 @@ struct RainSimulation {
     private var random: SplitMix
     private var time = 0.0
     private var backlog = 0.0
-    /// The time the latest `advance(by:)` that made steps started from: its steps are one frame's.
+    /// The time the latest `advance(by:)` that made steps started from, and how many it made:
+    /// its steps are one frame's.
     private var frameStart = 0.0
+    private var frameSteps = 0
     /// Water that has run off the bottom of the glass, for the books (tests).
     private(set) var drained = 0.0
     /// Water that has arrived, for the books.
@@ -74,13 +76,17 @@ struct RainSimulation {
         for case let drop? in field.slots { body(drop) }
     }
 
-    /// Points per second `drop` went down the glass over the latest frame's steps (0 if it did not
-    /// run in them). Often more than its speed: a runner put back in a slot the step has yet to
+    /// Points `drop` went down the glass over the latest frame's steps (0 if it did not run in
+    /// them). Often more than its speed gives: a runner put back in a slot the step has yet to
     /// reach is moved again in the same step, and what it takes in pulls it on. The motion blur
     /// follows this; with the speed it covered as little as half of a frame's travel, and the
     /// image in a runner jumped past sharp edges (a flicker, SPEC 2.2).
-    func pace(of drop: Drop) -> Double {
-        drop.movedAt > frameStart ? drop.moved / (time - frameStart) : 0
+    /// At most three steps' share of a longer frame (below 20 fps: a stalled Mac, a slow sequence),
+    /// so the blur stays as long as at 20 fps: six samples spread over seconds of travel would show
+    /// separate drops, not a blur.
+    func travel(of drop: Drop) -> Double {
+        guard drop.movedAt > frameStart else { return 0 }
+        return drop.moved * min(1, 3 / Double(frameSteps))
     }
 
     /// The wet trails, piece by piece.
@@ -101,9 +107,10 @@ struct RainSimulation {
     /// rounding error from a whole number of steps still make that number of steps.
     mutating func advance(by seconds: Double, _ settings: Settings) {
         backlog += min(max(seconds, 0), 5)
-        if backlog >= Self.step * (1 - 1e-6) { frameStart = time }
+        if backlog >= Self.step * (1 - 1e-6) { (frameStart, frameSteps) = (time, 0) }
         while backlog >= Self.step * (1 - 1e-6) {
             backlog = max(backlog - Self.step, 0)
+            frameSteps += 1
             advance(settings)
         }
     }

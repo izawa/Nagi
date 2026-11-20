@@ -25,6 +25,29 @@ struct DropsTests {
         #expect(rain(depth: 120, intensity: 1.5) == 1)
     }
 
+    /// The rain's gloom: the set darkness in a downpour, next to none in a sprinkle, half with
+    /// Increase Contrast or Reduce Transparency.
+    @Test func gloomFollowsTheRain() {
+        func gloom(depth: Double, reduce: Bool = false) -> Float {
+            Rain.uniforms(FrameState(time: 0, deltaTime: 0, date: .distantPast, phase: .calm, presence: 1,
+                                     depth: depth, appearance: .light,
+                                     accessibility: .init(reduceStrength: reduce), parameters: [:], seed: 1)).shade.y
+        }
+        #expect(abs(gloom(depth: 120) - 0.07) < 1e-6)
+        #expect(gloom(depth: 0) < 0.003)
+        #expect(abs(gloom(depth: 120, reduce: true) - 0.035) < 1e-6)
+    }
+
+    /// Users set the gloom in Settings up to 10 %; settings saved before it read as the
+    /// recommendation.
+    @Test func usersSetTheGloom() {
+        let spec = Rain.descriptor.parameters.first { $0.key == "gloom" }!
+        guard case let .slider(range)? = spec.user else { Issue.record("no user slider"); return }
+        #expect(range == 0...0.10)
+        #expect(spec.validated(.number(0.15), forUser: true) == .number(0.10))
+        #expect(spec.validated(nil, forUser: true) == .number(0.07))
+    }
+
     @Test func sameInputsSameDrops() {
         let a = Drops.scatter(displays: [display], depth: 60, intensity: 1, size: 1, seed: 1)
         #expect(a == Drops.scatter(displays: [display], depth: 60, intensity: 1, size: 1, seed: 1))
@@ -102,13 +125,15 @@ struct DropsTests {
         #expect(drops.contains { second.contains(CGPoint(x: $0.center.x, y: $0.center.y)) })
     }
 
-    /// A drop landing on a runner, even a larger one, leaves the runner's motion (for the blur).
+    /// A drop landing on a runner, even a larger one, leaves the runner's motion (for the blur),
+    /// and the merge's pull towards it adds to how far the runner went.
     @Test func mergeKeepsTheLatestRun() {
         var runner = Drop(center: SIMD2(0, 0), radius: 5, shape: 0)
         (runner.moved, runner.movedAt) = (12, 1)
-        let landed = Drop(center: SIMD2(6, 0), radius: 8, shape: 0)
+        let landed = Drop(center: SIMD2(0, 6), radius: 8, shape: 0)
         for merged in [runner.merged(with: landed, pull: 0.5), landed.merged(with: runner, pull: 0.5)] {
-            #expect(merged.moved == 12 && merged.movedAt == 1)
+            #expect(abs(merged.moved - (12 + merged.center.y)) < 1e-9 && merged.movedAt == 1)
+            #expect(merged.center.y > 3)                            // pulled most of the way: the larger one
         }
     }
 }

@@ -92,7 +92,7 @@ struct SimulationTests {
 
     /// The motion blur spans how far a runner went in the step, which can be more than its
     /// speed: put back in a free slot further on, it is moved again in the same step.
-    @Test func paceIsTheDistanceGone() {
+    @Test func travelIsTheDistanceGone() {
         let calm = RainSimulation.Settings(depth: 0, intensity: 0.0001, size: 1)
         var simulation = RainSimulation(displays: [CGRect(x: 0, y: 0, width: 400, height: 1400)], settings: calm, seed: 1)
         var field = DropField()
@@ -104,16 +104,21 @@ struct SimulationTests {
         simulation.replaceField(field)
         func runnerNow() -> Drop { simulation.drops.max { $0.area < $1.area }! }
         let before = runnerNow()
-        #expect(simulation.pace(of: before) == 0)                 // not run yet
+        #expect(simulation.travel(of: before) == 0)                 // not run yet
         simulation.advance(by: 1.0 / 60, calm)
         let after = runnerNow()
         let gone = after.center.y - before.center.y
-        #expect(abs(simulation.pace(of: after) * RainSimulation.step - gone) < 1e-9)
+        #expect(abs(simulation.travel(of: after) - gone) < 1e-9)
         #expect(gone > after.speed * RainSimulation.step * 1.5)  // moved twice
-        // A frame of two steps (30 fps): the pace is over both.
+        // A frame of two steps (30 fps): the travel is over both.
         simulation.advance(by: 2.0 / 60, calm)
         let later = runnerNow()
-        #expect(abs(simulation.pace(of: later) * 2 * RainSimulation.step - (later.center.y - after.center.y)) < 1e-9)
+        #expect(abs(simulation.travel(of: later) - (later.center.y - after.center.y)) < 1e-9)
+        // A long frame (half a second, 30 steps): three steps' share of what it went.
+        simulation.advance(by: 0.5, calm)
+        let last = runnerNow()
+        #expect(last.center.y - later.center.y > 50)               // it ran on
+        #expect(abs(simulation.travel(of: last) - (last.center.y - later.center.y) / 10) < 1e-6)
     }
 
     /// While nagi leaves no new drops land; with fewer drops asked for, the glass holds about half.

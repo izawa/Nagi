@@ -8,8 +8,8 @@ using namespace metal;
 
 #define LOBES 4
 struct Instance { float4 geometry; float4 lobes[LOBES]; };   // centre px, reach px, shape; lobe offset px, radius px
-// lobes[0].w: speed (points/s); lobes[1].w: how fast it went over the last step, for the blur
-struct Uniforms { float4 light; float4 look; float4 misc; float4 target; };   // target: size px, points→px, seconds a frame
+// lobes[0].w: speed (points/s); lobes[1].w: points it went over the frame, for the blur
+struct Uniforms { float4 light; float4 look; float4 misc; float4 target; float4 shade; };   // target: size px, points→px; shade: trail edges, gloom α
 
 struct DropOut {
     float4 position [[position]];
@@ -33,7 +33,7 @@ vertex DropOut dropVertex(uint vid [[vertex_id]], uint iid [[instance_id]],
     float2 corner = float2(vid & 1, vid >> 1) * 2 - 1;
     // A running drop is drawn longer (stretch), so the quad reaches further up and down.
     // A running drop is also blurred over its frame's travel, half above and half below.
-    float travel = d.lobes[1].w * u.target.z * u.target.w;
+    float travel = d.lobes[1].w * u.target.z;
     float2 pixel = d.geometry.xy + corner * (d.geometry.z * reach * float2(1, stretchFor(d.lobes[0].w)) + float2(0, travel / 2));
     float2 clip = pixel / u.target.xy * 2 - 1;
     DropOut out;
@@ -45,6 +45,13 @@ vertex DropOut dropVertex(uint vid [[vertex_id]], uint iid [[instance_id]],
 }
 
 float3 linearize(float3 c) { return select(pow((c + 0.055) / 1.055, 2.4), c / 12.92, c <= 0.04045); }
+
+// The sRGB transfer both ways, signed as the core's (extended range can go below 0).
+float3 encode(float3 c) {
+    float3 a = abs(c);
+    return sign(c) * select(1.055 * pow(a, 1 / 2.4) - 0.055, a * 12.92, a <= 0.0031308);
+}
+float3 decode(float3 c) { return sign(c) * linearize(abs(c)); }
 
 // The field, its gradient, and where it is centred here: the lobes' centres and radii weighted by
 // how much each counts at this point (a merged drop bends around the lobe you are over).
@@ -151,7 +158,7 @@ fragment float4 dropFragment(DropOut in [[stage_in]], texture2d<float> backdrop 
     // ring and its light jump past a pixel frame by frame and flicker (SPEC 2.2).
     // Pixels the drop moves in one frame: what it went, not its speed (a runner is moved on by what
     // it takes in, and can go twice its speed or more).
-    float travel = d.lobes[1].w * u.target.z * u.target.w;
+    float travel = d.lobes[1].w * u.target.z;
     float4 colour = 0;
     if (travel < 0.5) {
         colour = shadeDrop(d, p, p, in.centre, in.shape, backdrop, u);
@@ -216,8 +223,34 @@ fragment float4 trailFragment(TrailOut in [[stage_in]], texture2d<float> backdro
     // The film's slope bends the screen a hair towards its middle.
     float2 source = in.position.xy - in.normal * in.across * in.halfWidth * 0.25 * body * u.misc.x;
     float3 colour = linearize(backdrop.sample(s, source / size).rgb);
-    // Its edges catch a little light and a little shade, like the rim of a drop, faintly.
-    colour *= 1 - 0.12 * u.look.x * smoothstep(0.3, 1.0, abs(x)) * body;
+    // Its edges turn the light away, like the rim of a drop, so the film shows on a plain screen
+    // too (bent alone, it was lost among the drops of a downpour).
+    colour *= 1 - u.shade.x * smoothstep(0.3, 1.0, abs(x)) * body;
     float alpha = body * in.left * 0.6;
     return float4(colour * alpha, alpha);
+}
+
+// MARK: - Gloom
+
+// The whole screen a little darker while it rains: one triangle over the output, after the drops,
+// that rewrites each pixel drawn so far (read back from the target, no blending). The core blends
+// the layer over the desktop in encoded values (SPEC 3.5), so the new colour and alpha are those
+// that leave the final pixel, desktop and effects alike, darker by the gloom in encoded values.
+// Plain black blended in linear values instead darkened a drop by about 3 % against 7 % around
+// it, and could brighten a faint light below.
+
+struct GloomOut { float4 position [[position]]; };
+
+vertex GloomOut gloomVertex(uint vid [[vertex_id]]) {
+    float2 corner = float2((vid << 1) & 2, vid & 2);
+    GloomOut out;
+    out.position = float4(corner * 2 - 1, 0, 1);
+    return out;
+}
+
+fragment float4 gloomFragment(GloomOut in [[stage_in]], float4 drawn [[color(0)]], constant Uniforms &u [[buffer(1)]]) {
+    float g = u.shade.y;
+    float a = drawn.a + g * (1 - drawn.a);   // the desktop shows through (1 − g) as much
+    if (drawn.a <= 0) return float4(0, 0, 0, a);
+    return float4(a * decode((1 - g) * drawn.a * encode(drawn.rgb / drawn.a) / a), a);
 }

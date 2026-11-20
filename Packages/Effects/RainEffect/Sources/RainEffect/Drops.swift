@@ -36,7 +36,7 @@ struct Drop: Equatable {
     var trailEnd: SIMD2<Double>?
     /// Points a runner went down the glass over the steps of the latest frame, up to simulation
     /// time `movedAt`: its run plus the jumps towards what it took in, over every time it was moved
-    /// (it can be moved more than once a step: see RainSimulation.pace). The motion blur spans
+    /// (it can be moved more than once a step: see RainSimulation.travel). The motion blur spans
     /// this, not its speed.
     var moved = 0.0
     var movedAt = -1.0
@@ -113,8 +113,10 @@ struct Drop: Equatable {
         drop.trailEnd = a >= b ? trailEnd : other.trailEnd
         drop.nextBead = a >= b ? nextBead : other.nextBead
         // The more recent run: a drop landing on a runner must not take its motion away.
+        // The merge moves it on too, by its share of the way to the other's centre.
         let ours = movedAt != other.movedAt ? movedAt > other.movedAt : a >= b
-        (drop.moved, drop.movedAt) = ours ? (moved, movedAt) : (other.moved, other.movedAt)
+        let runner = ours ? self : other
+        (drop.moved, drop.movedAt) = (runner.moved + abs(center.y - runner.center.y), runner.movedAt)
         return drop
     }
 

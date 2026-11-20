@@ -50,6 +50,16 @@
           }
         }
       }
+    },
+    "雨の暗さ": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Rain Dimming"
+          }
+        }
+      }
     }
   },
   "version": "1.0"
