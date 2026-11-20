@@ -103,6 +103,24 @@ import QuartzCore
     /// The screen behind the overlays, for `.backdrop` effects, only while nagi shows (SPEC 3.9).
     private let capture: BackdropCapture
     private var needsBackdrop = false
+    /// The windows on the screen, for `.windows` effects (SPEC 3.10, M3-PLAN 3.4).
+    private let windows = WindowService()
+    private var needsWindows = false
+    private var windowsAskedAt = -Double.infinity
+    /// The last reading of the whole list (ages of windows off screen, windows gone), kept apart
+    /// from the readings of a showing so short showings cannot put it off.
+    private var wholeListAskedAt = -Double.infinity
+    /// While nagi does not show, the windows' ages are kept up every 30 seconds (DECISIONS D32).
+    private var windowPolling: Timer?
+    private static let windowPollingInterval = 30.0
+    /// Readings a second while nagi shows; set from stage A2's measurements (M3-PLAN 3.4).
+    public var windowReadingsPerSecond = 5.0
+    /// Debug: multiplies every window's age (M3-PLAN 3.3).
+    public var windowAgeScale: Double {
+        get { windows.ageScale }
+        set { windows.ageScale = newValue }
+    }
+    private let windowTimes = GPUTimes()
     /// The effects of the current showing (empty while hidden).
     private var running: [String] = []
     /// The displays being captured, to restart only when they change.
@@ -136,6 +154,8 @@ import QuartzCore
     private let withdrawalGuard: WithdrawalGuard
     private let trace: Logger?
     private var screenObserver: (any NSObjectProtocol)?
+    private var spaceObserver: (any NSObjectProtocol)?
+    private var windowDisplays = WindowService.displays()
 
     private let measurement: MeasurementOptions
 
@@ -158,6 +178,11 @@ import QuartzCore
         signals.onChange = { [weak self] in self?.sample() }
         captureLog = { [weak self] in self?.log($0) }
         capture.onStop = { [weak self] reason in self?.captureStopped(reason) }
+        if trace != nil {
+            let windowTimes = windowTimes
+            windows.onRead = { windowTimes.add($0) }
+            windows.onNote = { [weak self] in self?.log($0) }
+        }
         cleanUp = { [weak self] generation in
             guard let self, self.overlays.isShown, self.withdrawalGuard.isCurrent(generation) else { return }
             self.forceDown(reason: "guard cleanup")
@@ -167,16 +192,38 @@ import QuartzCore
             MainActor.assumeIsolated {
                 guard let self else { return }
                 self.overlays.rebuild()
+                self.screenMayHaveChanged(displaysOnly: true)
                 if self.overlays.isShown {
                     self.withdrawalGuard.replace(self.overlays.layers)
                     if self.output?.phase != .leaving { self.startCapture() }
                 }
             }
         }
+        spaceObserver = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.activeSpaceDidChangeNotification, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.screenMayHaveChanged(displaysOnly: false) }
+        }
     }
 
     isolated deinit {
         if let screenObserver { NotificationCenter.default.removeObserver(screenObserver) }
+        if let spaceObserver { NSWorkspace.shared.notificationCenter.removeObserver(spaceObserver) }
+        windowPolling?.invalidate()
+    }
+
+    /// The displays were arranged anew or another Space came up: the windows read before may be
+    /// elsewhere now. The overlay shows none until a new reading (M3-PLAN 3.4). Screen-parameter
+    /// notifications also come for EDR headroom alone; those change nothing here.
+    private func screenMayHaveChanged(displaysOnly: Bool) {
+        let displays = WindowService.displays()
+        if displaysOnly, displays == windowDisplays { return }
+        windowDisplays = displays
+        windows.displaysMayHaveChanged()
+        log("screen changed displaysOnly=\(displaysOnly)")
+        guard overlays.isShown, needsWindows else { return }
+        frame?.windows = nil  // other displays draw the cached frame until the driver's next one
+        windowsAskedAt = Self.now
+        windows.invalidate(then: .visible)
     }
 
     public func start() {
@@ -259,6 +306,7 @@ import QuartzCore
         }
         armWatchdog(next.leaveDeadline)
         scheduleWake(next, inputs: inputs)
+        pollWindows(inputs)
         return next
     }
 
@@ -277,6 +325,13 @@ import QuartzCore
         weather.cloudBias = descriptors.compactMap { $0.weatherHint?.cloudBias }.reduce(0, +)
         needsBackdrop = descriptors.contains { $0.capabilities.contains(.backdrop) }
         if !needsBackdrop { stopCapture() }
+        let wanted = descriptors.contains { $0.capabilities.contains(.windows) }
+        // A new showing waits for a reading of the screen as it is now (M3-PLAN 3.4).
+        if wanted, !needsWindows {
+            windowsAskedAt = Self.now
+            windows.invalidate(then: .visible)
+        }
+        needsWindows = wanted
         log("effects \(running)")
     }
 
@@ -320,6 +375,8 @@ import QuartzCore
         overlays.hide()
         stopCapture()
         running = []
+        if needsWindows { windows.invalidate() }
+        needsWindows = false
         renderer.releaseResources()
         watchdog?.invalidate()
         watchdog = nil
@@ -375,6 +432,38 @@ import QuartzCore
         wakeTimer = timer
     }
 
+    /// While nagi does not show, reads the windows every 30 seconds if an enabled effect uses
+    /// them, so their ages are known when it does (DECISIONS D32). Not while paused, held off or
+    /// with the screen locked: the ages carry over, since a window that kept its frame is the
+    /// same window (M3-PLAN 3.3).
+    private func pollWindows(_ inputs: NagiInputs) {
+        let enabled = renderer.descriptors.contains {
+            $0.capabilities.contains(.windows) && selection.enabled.contains($0.id)
+        }
+        let mediaHolds = inputs.mediaActive && inputs.suppressDuringMedia
+        guard enabled, !overlays.isShown, !inputs.paused, !inputs.screenUnavailable, !mediaHolds else {
+            windowPolling?.invalidate()
+            windowPolling = nil
+            return
+        }
+        if inputs.now - wholeListAskedAt >= Self.windowPollingInterval { readWindows(.all) }
+        guard windowPolling == nil else { return }
+        // The timer only samples: the read happens above, after this very sample's checks.
+        let timer = Timer(timeInterval: Self.windowPollingInterval, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { _ = self?.sample() }
+        }
+        timer.tolerance = 5
+        RunLoop.main.add(timer, forMode: .common)
+        windowPolling = timer
+    }
+
+    /// Asks for a reading; a reading still under way keeps the request due.
+    private func readWindows(_ kind: WindowService.Kind) {
+        guard windows.refresh(kind) else { return }
+        windowsAskedAt = Self.now
+        if kind == .all { wholeListAskedAt = Self.now }
+    }
+
     /// Takes the overlays down at the leave deadline even if no frame came (SPEC 3.3).
     private func armWatchdog(_ deadline: Double?) {
         guard let deadline else { return }
@@ -413,11 +502,16 @@ import QuartzCore
             if cloudPassEachShowing, framesThisShowing == 1 { weather.sky = .cloudPass(start: windClock) }
             // A new showing starts from the current depth even if its first frame is already leaving.
             if output.phase != .leaving || framesThisShowing == 1 { shownDepth = output.depth }
+            // Not while leaving: the hands are back, and a Space switch slides the windows about.
+            if needsWindows, output.phase != .leaving, now - windowsAskedAt >= 1 / windowReadingsPerSecond {
+                readWindows(.visible)
+            }
             frame = FrameState(
                 time: now, deltaTime: deltaTime, date: date, phase: output.phase.framePhase,
                 presence: output.presence, depth: shownDepth, appearance: Self.appearance,
                 accessibility: accessibility, seed: 1, environment: environment(at: date),
-                displays: overlays.overlays.values.map(\.view.frameInDesktop), showing: showings)
+                displays: overlays.overlays.values.map(\.view.frameInDesktop), showing: showings,
+                windows: needsWindows ? windows.snapshot : nil)
             renderer.update(frame)
             self.frame = frame
         } else {
@@ -459,6 +553,7 @@ import QuartzCore
             if framesThisShowing % 300 == 0 {
                 if let summary = gpuTimes.drain() { log("gpu \(summary)") }
                 if let summary = Self.intervalSummary(frameIntervals) { log("frames \(summary)") }
+                if let summary = windowTimes.drain() { log("window list \(summary)") }
                 frameIntervals.removeAll()
             }
         }

@@ -14,6 +14,8 @@ import SwiftUI
 /// - `--trace`: log nagi's transitions to the unified log (subsystem org.izawa.Nagi).
 /// - `--debug-lens`: also draw a few drifting lenses that magnify the captured screen (needs
 ///   Screen Recording; M2-PLAN stage A).
+/// - `--debug-windows`: also offer the window check, which draws what the window service sees
+///   (M3-PLAN stage A1). `--debug-window-age-scale n` makes every window age n times as fast.
 /// - `--debug-patch r,g,b,a,x0,y0,x1,y1`: also draw a flat premultiplied colour (pixels; the
 ///   rectangle may be omitted for the whole display).
 /// - `--sharing-readonly`: let screenshots and capture see the overlay.
@@ -152,6 +154,8 @@ import SwiftUI
         if patch != nil { effects = [PatchEffect.self] }
         // The lens checks the screen capture (M2-PLAN stage A), over the effects the user has on.
         if arguments.contains("--debug-lens") { effects.append(LensEffect.self) }
+        // The window check shows what the window service sees (M3-PLAN stage A1, checkpoint H).
+        if arguments.contains("--debug-windows") { effects.append(WindowCheckEffect.self) }
         do {
             let measurement = MeasurementOptions(
                 emptyFrames: arguments.contains("--debug-empty-frame"),
@@ -171,6 +175,9 @@ import SwiftUI
             if arguments.contains("--debug-strongest-wind") { engine.weather.strongestWind = true }
             if arguments.contains("--debug-clear-sky") { engine.weather.sky = .clear }
             if arguments.contains("--debug-cloud-pass") { engine.cloudPassEachShowing = true }
+            if let scale = Self.value(after: "--debug-window-age-scale", in: arguments).flatMap(Double.init), scale.isFinite, scale > 0 {
+                engine.windowAgeScale = scale
+            }
             if let date = Self.value(after: "--debug-date", in: arguments).flatMap(ISO8601DateFormatter().date(from:)) {
                 engine.pinnedDate = date
             }

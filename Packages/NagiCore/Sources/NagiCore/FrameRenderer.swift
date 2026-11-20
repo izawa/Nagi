@@ -219,6 +219,7 @@ private extension FrameState {
         var values = Dictionary(uniqueKeysWithValues: descriptor.parameters.map { ($0.key, $0.defaultValue) })
         values.merge(saved[descriptor.id] ?? [:]) { _, saved in saved }
         frame.parameters = values
+        if !descriptor.capabilities.contains(.windows) { frame.windows = nil }
         return frame
     }
 }

@@ -17,6 +17,9 @@ public struct PreviewScene: Sendable {
     public var accessibility = AccessibilityAdjustments()
     /// The displays the frame is drawn on (FrameState.displays): the preview's one view.
     public var displays: [CGRect] = []
+    /// Made-up windows at the start (WindowLayout); they age with the frames, at the wall
+    /// clock's pace whatever Reduce Motion does to the wind.
+    public var windows: WindowSnapshot?
 
     public init(date: Date, location: GeoLocation? = nil, windTime: Double = 0, seed: UInt64 = 1,
                 weather: EnvironmentModel.Weather = .init(sky: .clear), appearance: Appearance = .light) {
@@ -37,7 +40,7 @@ public struct PreviewScene: Sendable {
                           depth: depth, appearance: appearance, accessibility: accessibility, seed: seed,
                           environment: EnvironmentModel.environment(at: date, location: location, windTime: time,
                                                                     seed: seed, weather: weather),
-                          displays: displays)
+                          displays: displays, windows: windows?.aged(by: elapsed))
     }
 
     /// The display a preview draws on, at 2× (a Retina display), of a given physical size; the

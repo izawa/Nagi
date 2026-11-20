@@ -5,7 +5,8 @@
 //     --seed 42 --background gray:0.9 --size 1600x1000 --physical-mm 400x250 --output noon.png
 //
 // Effects: the app's catalog, plus "patch" (a flat premultiplied colour, for calibration) and
-// "lens" (magnifies the background, as the screen capture will feed it).
+// "lens" (magnifies the background, as the screen capture will feed it) and "windowcheck" (what
+// the window service sees: outlines, the band where moss would grow, the screen's corners).
 // --param key=value sets an effect parameter (number, true/false, or a choice key).
 
 import CoreGraphics
@@ -23,7 +24,7 @@ import NagiKit
     arguments.removeFirst()
     let options = try Options(arguments)
 
-    let available: [any Effect.Type] = EffectCatalog.all + [PatchEffect.self, LensEffect.self]
+    let available: [any Effect.Type] = EffectCatalog.all + [PatchEffect.self, LensEffect.self, WindowCheckEffect.self]
     let ids = effectList.split(separator: ",").map(String.init)
     guard Set(ids).count == ids.count else { throw NagiCoreError("an effect is listed twice") }
     let types = try ids.map { id in
@@ -43,6 +44,7 @@ import NagiKit
     var scene = PreviewScene(date: options.date, location: options.location, windTime: options.time, seed: options.seed,
                              weather: weather, appearance: options.appearance)
     scene.displays = [view.frameInDesktop]
+    scene.windows = try options.windows.map { try WindowLayout.named($0).snapshot(on: view.frameInDesktop, age: options.windowAge) }
     let deltaTime = options.frames == 1 ? 1.0 / 60 : 1.0 / options.fps
     var replay = options.inputAt.map { EnvelopeReplay(inputAt: $0) }
     for index in 0..<options.frames {
@@ -93,6 +95,9 @@ struct Options {
     var output = URL(fileURLWithPath: "nagi.png")
     var location: GeoLocation?
     var debugAlpha = false
+    /// A built-in window arrangement or a JSON file (WindowLayout), and the windows' age.
+    var windows: String?
+    var windowAge = 7200.0
 
     init(_ arguments: [String]) throws {
         var index = 0
@@ -146,6 +151,10 @@ struct Options {
                 let parts = try value().split(separator: "=", maxSplits: 1).map(String.init)
                 guard parts.count == 2 else { throw usage() }
                 parameters[parts[0]] = ParameterValue(parsing: parts[1])
+            case "--windows": windows = try value()
+            case "--window-age":
+                windowAge = try number(value())
+                guard windowAge >= 0 else { throw usage() }
             case "--output": output = URL(fileURLWithPath: try value())
             case "--debug-alpha":
                 debugAlpha = true
@@ -208,9 +217,10 @@ func usage() -> NagiCoreError {
     usage: nagi-render <effect[,effect…]> [--at ISO8601] [--time s] [--frames N] [--fps F] [--depth s] [--depth-rate r] [--input-at s] [--presence 0…1] \
     [--strength 0…1] [--appearance light|dark] [--seed n] [--background gray:<0…1>|<image>] \
     [--size WxH] [--physical-mm WxH] [--location lat,lon] [--sky clear|natural|pass] [--param key=value]… \
-    [--debug-alpha] [--output file.png]
+    [--windows single|overlap|panel|fullscreen|empty|<file.json>] [--window-age s] [--debug-alpha] [--output file.png]
     --frames defaults to 1. Sequences default to 30 fps and write file-0000.png, file-0001.png, …
     --sky defaults to clear; pass is one cloud crossing the sun, starting at --time.
+    --windows lays out made-up windows for effects that use them; --window-age (default 7200) is how long they have kept still.
     """)
 }
 

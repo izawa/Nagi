@@ -27,11 +27,15 @@ public struct FrameState: Sendable {
     /// Counts the times nagi has shown: a new value means a new showing, so an effect with state
     /// (rain's drops) can start over.
     public var showing: Int
+    /// The windows on the screen, only for effects that declare `.windows` (nil otherwise, and
+    /// until the first reading of a showing arrives).
+    public var windows: WindowSnapshot?
 
     public init(time: TimeInterval, deltaTime: TimeInterval, date: Date, phase: NagiPhase, presence: Double,
                 depth: Double, appearance: Appearance, quality: Quality = .standard,
                 accessibility: AccessibilityAdjustments = .init(), parameters: [String: ParameterValue] = [:],
-                seed: UInt64, environment: SharedEnvironment = .init(), displays: [CGRect] = [], showing: Int = 0) {
+                seed: UInt64, environment: SharedEnvironment = .init(), displays: [CGRect] = [], showing: Int = 0,
+                windows: WindowSnapshot? = nil) {
         self.time = time
         self.deltaTime = deltaTime
         self.date = date
@@ -46,6 +50,7 @@ public struct FrameState: Sendable {
         self.environment = environment
         self.displays = displays
         self.showing = showing
+        self.windows = windows
     }
 
     public func number(_ key: String, default value: Double) -> Double {
