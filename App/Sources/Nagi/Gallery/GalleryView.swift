@@ -36,6 +36,8 @@ struct GalleryView: View {
             Picker("背景", selection: $model.fixture) {
                 Text("本文(ライト)").tag(GalleryModel.Fixture.readingLight)
                 Text("本文(ダーク)").tag(GalleryModel.Fixture.readingDark)
+                Text("ウィンドウ(ライト)").tag(GalleryModel.Fixture.deskLight)
+                Text("ウィンドウ(ダーク)").tag(GalleryModel.Fixture.deskDark)
             }
             Picker("外観", selection: $model.appearance) {
                 Text("ライト").tag(Appearance.light)
@@ -74,6 +76,16 @@ struct GalleryView: View {
                 Text("60 fps").tag(60)
             }
             .pickerStyle(.segmented)
+        }
+        if model.effect.descriptor.capabilities.contains(.windows) {
+            Section("ウィンドウ") {
+                // Moss starts at 10 minutes, is full at two hours, bears sporophytes after (M3-LOG).
+                Picker("動かしていない時間", selection: $model.windowAge) {
+                    ForEach([0, 10, 20, 30, 60, 90, 120, 180, 240], id: \.self) { minutes in
+                        Text("\(minutes) 分").tag(Double(minutes * 60))
+                    }
+                }
+            }
         }
         Section("深さ") {
             LabeledContent("深さ \(Int(model.depth)) 秒") {

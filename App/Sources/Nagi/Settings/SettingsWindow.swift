@@ -227,8 +227,7 @@ private struct EffectSection: View {
         guard preview == nil, let device,
               let type = store.effects.first(where: { $0.descriptor.id == descriptor.id }) else { return }
         let model = GalleryModel(effect: type)
-        model.fixture = NSApp.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
-            ? .readingDark : .readingLight
+        model.fixture = .sample(for: type, dark: NSApp.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua)
         model.parameters = store.parameters(for: descriptor.id)
         model.framesPerSecond = Int(store.frameRateCap)
         model.strength = store.settings.strength

@@ -8,8 +8,16 @@ import Observation
 @MainActor @Observable final class GalleryModel {
     enum Fixture: String, CaseIterable, Identifiable {
         case readingLight = "reading-light", readingDark = "reading-dark"
+        /// Two windows on a desktop, where WindowLayout's "overlap" puts them (scripts/make-desk-fixtures.py).
+        case deskLight = "desk-light", deskDark = "desk-dark"
         var id: String { rawValue }
-        var appearance: Appearance { self == .readingDark ? .dark : .light }
+        var appearance: Appearance { self == .readingDark || self == .deskDark ? .dark : .light }
+
+        /// The sample for an effect in the given appearance: windows on a desktop for effects that
+        /// use windows (moss), the reading page for the others.
+        static func sample(for effect: any Effect.Type, dark: Bool) -> Fixture {
+            effect.descriptor.capabilities.contains(.windows) ? (dark ? .deskDark : .deskLight) : (dark ? .readingDark : .readingLight)
+        }
     }
 
     enum Sky: String, CaseIterable, Identifiable {
@@ -72,8 +80,21 @@ import Observation
     private(set) var phase = NagiStatePhase.calm
     private(set) var presence = 1.0
 
+    /// For effects that use windows: how long the sample windows have kept still (seconds).
+    var windowAge = 7200.0
+
     init(effect: any Effect.Type) {
         self.effect = effect
+        fixture = .sample(for: effect, dark: false)
+    }
+
+    /// The windows of the background on `display` (desktop points), for effects that use windows:
+    /// the desktop images show WindowLayout's "overlap", the reading pages none.
+    func windows(on display: CGRect) -> WindowSnapshot? {
+        guard effect.descriptor.capabilities.contains(.windows) else { return nil }
+        let desk = fixture == .deskLight || fixture == .deskDark
+        guard let layout = WindowLayout.builtIn[desk ? "overlap" : "empty"] else { return nil }
+        return layout.snapshot(on: display, age: windowAge)
     }
 
     /// The chosen day at the chosen wall-clock time (hours and minutes, so a daylight-saving day

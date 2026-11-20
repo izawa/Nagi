@@ -39,8 +39,9 @@ import SwiftUI
 
     func start() {
         guard link == nil else { return }
-        // Decode the sample backgrounds now, not in the middle of a frame.
-        for fixture in GalleryModel.Fixture.allCases { _ = try? background(for: fixture) }
+        // Decode the sample background now, not in the middle of a frame (another one chosen later
+        // in the gallery loads when chosen).
+        _ = try? background(for: model.fixture)
         let target = LinkTarget(display: 0) { [weak self] _, update in self?.draw(update) }
         let link = CAMetalDisplayLink(metalLayer: metalLayer)
         link.delegate = target
@@ -80,6 +81,7 @@ import SwiftUI
         var frame = model.advance(by: seconds)
         frame.displays = [view.frameInDesktop]
         frame.showing = model.showings
+        frame.windows = model.windows(on: view.frameInDesktop)
         do {
             let background = try background(for: model.fixture)
             guard let commandBuffer = renderer.queue.makeCommandBuffer() else { return }
