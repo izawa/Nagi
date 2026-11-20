@@ -1,7 +1,7 @@
 #!/bin/zsh
 # Builds build/Nagi.app from `swift build` products (DECISIONS D12): the executable, the resource
-# bundles in Contents/Resources, Info.plist, then signs inside out with Developer ID, Hardened
-# Runtime and App Sandbox. The identity comes from $SIGN_IDENTITY or Config/Local.xcconfig.
+# bundles and the icon in Contents/Resources, Info.plist, then signs inside out with Developer ID,
+# Hardened Runtime and App Sandbox. The identity comes from $SIGN_IDENTITY or Config/Local.xcconfig.
 # Release signing (with a secure timestamp) is scripts/release.sh's job; this build has none.
 set -euo pipefail
 
@@ -19,25 +19,11 @@ mkdir -p $app/Contents/MacOS $app/Contents/Resources
 /bin/cp -f $products/Nagi $app/Contents/MacOS/Nagi
 for bundle in $products/*.bundle(N); do /bin/cp -R $bundle $app/Contents/Resources/; done
 /bin/cp -f $root/App/AppIcon/AppIcon.icns $app/Contents/Resources/  # drawn by scripts/make-icon.py
-cat > $app/Contents/Info.plist <<PLIST
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0"><dict>
-  <key>CFBundleIdentifier</key><string>org.izawa.Nagi</string>
-  <key>CFBundleExecutable</key><string>Nagi</string>
-  <key>CFBundleName</key><string>Nagi</string>
-  <key>CFBundleDisplayName</key><string>Nagi</string>
-  <key>CFBundleIconFile</key><string>AppIcon</string>
-  <key>CFBundlePackageType</key><string>APPL</string>
-  <key>CFBundleShortVersionString</key><string>0.1.0</string>
-  <key>CFBundleVersion</key><string>$(date +%Y%m%d%H%M%S)</string>
-  <key>CFBundleDevelopmentRegion</key><string>ja</string>
-  <key>CFBundleLocalizations</key><array><string>ja</string><string>en</string></array>
-  <key>LSMinimumSystemVersion</key><string>27.0</string>
-  <key>LSUIElement</key><true/>
-  <key>NSHighResolutionCapable</key><true/>
-</dict></plist>
-PLIST
+# Info.plist (version, icon, LSUIElement) is App/Info.plist; the build number is the commit count,
+# so each build can be traced to its commit.
+/bin/cp -f $root/App/Info.plist $app/Contents/Info.plist
+/usr/libexec/PlistBuddy -c "Set :CFBundleVersion $(git -C $root rev-list --count HEAD)" $app/Contents/Info.plist
+printf "APPL????" > $app/Contents/PkgInfo
 for bundle in $app/Contents/Resources/*.bundle(N); do
     codesign --force --sign $identity $timestamp $bundle
 done
