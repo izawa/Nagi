@@ -36,7 +36,8 @@ public final class Rain: Effect {
 
     /// Per drop, for the shader: centre and reach in pixels, and the outline's seed; then each
     /// lobe's offset and radius in pixels (radius 0: no lobe). The first lobe's last value is the
-    /// drop's speed in points per second.
+    /// drop's speed in points per second; the second's, how fast it went over the last step
+    /// (RainSimulation.pace), for the motion blur.
     struct Instance {
         var geometry: SIMD4<Float>
         var lobes: (SIMD4<Float>, SIMD4<Float>, SIMD4<Float>, SIMD4<Float>)
@@ -177,11 +178,13 @@ public final class Rain: Effect {
         let frame = view.frameInDesktop
         let origin = SIMD2(Double(frame.minX), Double(frame.minY))
         let scale = view.scale
+        guard let simulation else { return [] }
         var instances: [Instance] = []
-        instances.reserveCapacity(simulation?.field.slots.count ?? 0)
-        simulation?.forEachDrop { drop in
+        instances.reserveCapacity(simulation.field.slots.count)
+        simulation.forEachDrop { drop in
             // A running drop is drawn up to 1.8 times as long, and blurred over a frame's travel.
-            let extent = drop.reach * 1.6 * 1.8 + drop.speed * 0.1
+            let pace = simulation.pace(of: drop)
+            let extent = drop.reach * 1.6 * 1.8 + pace * 0.1
             guard drop.center.x + extent >= frame.minX, drop.center.x - extent <= frame.maxX,
                   drop.center.y + extent >= frame.minY, drop.center.y - extent <= frame.maxY else { return }
             func lobe(_ i: Int) -> SIMD4<Float> {
@@ -189,11 +192,12 @@ public final class Rain: Effect {
                 let l = drop.lobes[i]
                 return SIMD4(Float(l.offset.x * scale), Float(l.offset.y * scale), Float(l.radius * scale), 0)
             }
-            var first = lobe(0)
+            var first = lobe(0), second = lobe(1)
             first.w = Float(drop.speed)
+            second.w = Float(pace)
             let center = (drop.center - origin) * scale
             instances.append(Instance(geometry: SIMD4(Float(center.x), Float(center.y), Float(drop.reach * scale), Float(drop.shape)),
-                                      lobes: (first, lobe(1), lobe(2), lobe(3))))
+                                      lobes: (first, second, lobe(2), lobe(3))))
         }
         return instances
     }

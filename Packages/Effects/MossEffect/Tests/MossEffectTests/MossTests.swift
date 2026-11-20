@@ -46,4 +46,24 @@ struct MossTests {
         let patches = Moss.patches(snapshot([front, window(1, CGRect(x: 100, y: 100, width: 600, height: 400))]))
         #expect(patches.isEmpty)
     }
+
+    /// Dew on a still morning (M3-PLAN 5.3): low in the east only, and less under rain.
+    @Test func dewOnlyOnStillMornings() {
+        let east = CelestialPosition(altitude: 10 * .pi / 180, azimuth: .pi / 2)
+        let west = CelestialPosition(altitude: 10 * .pi / 180, azimuth: 3 * .pi / 2)
+        let high = CelestialPosition(altitude: 40 * .pi / 180, azimuth: .pi / 2)
+        #expect(Moss.dew(sun: east, depth: 150, precipitation: 0) > 0.9)
+        #expect(Moss.dew(sun: west, depth: 150, precipitation: 0) == 0)
+        #expect(Moss.dew(sun: high, depth: 150, precipitation: 0) == 0)
+        #expect(Moss.dew(sun: east, depth: 10, precipitation: 0) == 0)
+        #expect(Moss.dew(sun: east, depth: 150, precipitation: 1) < 0.25)
+    }
+
+    @Test func windLeansWithinBounds() {
+        let gust = Wind.Gust(onset: 0, rise: 2, duration: 10, strength: 1)
+        let wind = Wind(velocity: SIMD2(10, 0), time: 2, frontDirection: SIMD2(1, 0), gusts: [gust])
+        let lean = Moss.lean(wind, at: CGRect(x: 0, y: 0, width: 100, height: 40))
+        #expect(lean > 0 && lean <= 1)
+        #expect(Moss.lean(Wind(), at: CGRect(x: 0, y: 0, width: 100, height: 40)) == 0)
+    }
 }

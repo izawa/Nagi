@@ -8,6 +8,7 @@ using namespace metal;
 
 #define LOBES 4
 struct Instance { float4 geometry; float4 lobes[LOBES]; };   // centre px, reach px, shape; lobe offset px, radius px
+// lobes[0].w: speed (points/s); lobes[1].w: how fast it went over the last step, for the blur
 struct Uniforms { float4 light; float4 look; float4 misc; float4 target; };   // target: size px, points→px, seconds a frame
 
 struct DropOut {
@@ -32,7 +33,7 @@ vertex DropOut dropVertex(uint vid [[vertex_id]], uint iid [[instance_id]],
     float2 corner = float2(vid & 1, vid >> 1) * 2 - 1;
     // A running drop is drawn longer (stretch), so the quad reaches further up and down.
     // A running drop is also blurred over its frame's travel, half above and half below.
-    float travel = d.lobes[0].w * u.target.z * u.target.w;
+    float travel = d.lobes[1].w * u.target.z * u.target.w;
     float2 pixel = d.geometry.xy + corner * (d.geometry.z * reach * float2(1, stretchFor(d.lobes[0].w)) + float2(0, travel / 2));
     float2 clip = pixel / u.target.xy * 2 - 1;
     DropOut out;
@@ -148,7 +149,9 @@ fragment float4 dropFragment(DropOut in [[stage_in]], texture2d<float> backdrop 
     // A running drop is seen blurred along its run, as an eye or a camera sees it: the frame is
     // the average of where it was over the frame's time. Without this the image it carries, its
     // ring and its light jump past a pixel frame by frame and flicker (SPEC 2.2).
-    float travel = d.lobes[0].w * u.target.z * u.target.w;   // pixels the drop moves in one frame
+    // Pixels the drop moves in one frame: what it went, not its speed (a runner is moved on by what
+    // it takes in, and can go twice its speed or more).
+    float travel = d.lobes[1].w * u.target.z * u.target.w;
     float4 colour = 0;
     if (travel < 0.5) {
         colour = shadeDrop(d, p, p, in.centre, in.shape, backdrop, u);

@@ -101,4 +101,14 @@ struct DropsTests {
             || second.contains(CGPoint(x: $0.center.x, y: $0.center.y)) })
         #expect(drops.contains { second.contains(CGPoint(x: $0.center.x, y: $0.center.y)) })
     }
+
+    /// A drop landing on a runner, even a larger one, leaves the runner's motion (for the blur).
+    @Test func mergeKeepsTheLatestRun() {
+        var runner = Drop(center: SIMD2(0, 0), radius: 5, shape: 0)
+        (runner.moved, runner.movedAt) = (12, 1)
+        let landed = Drop(center: SIMD2(6, 0), radius: 8, shape: 0)
+        for merged in [runner.merged(with: landed, pull: 0.5), landed.merged(with: runner, pull: 0.5)] {
+            #expect(merged.moved == 12 && merged.movedAt == 1)
+        }
+    }
 }

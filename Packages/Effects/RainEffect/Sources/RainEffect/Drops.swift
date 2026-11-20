@@ -34,6 +34,12 @@ struct Drop: Equatable {
     /// Where this runner's wet trail ends so far: the next piece starts there, so the trail stays
     /// one line even where the runner jumps aside to take in a drop.
     var trailEnd: SIMD2<Double>?
+    /// Points a runner went down the glass over the steps of the latest frame, up to simulation
+    /// time `movedAt`: its run plus the jumps towards what it took in, over every time it was moved
+    /// (it can be moved more than once a step: see RainSimulation.pace). The motion blur spans
+    /// this, not its speed.
+    var moved = 0.0
+    var movedAt = -1.0
 
     /// A drop that lands as a few lobes of different sizes, not a perfect circle: water hits the
     /// glass unevenly. `random` picks how many (1–3), where, and how large; the water is `radius`'s.
@@ -106,6 +112,9 @@ struct Drop: Equatable {
         drop.heldUntil = max(heldUntil, other.heldUntil)
         drop.trailEnd = a >= b ? trailEnd : other.trailEnd
         drop.nextBead = a >= b ? nextBead : other.nextBead
+        // The more recent run: a drop landing on a runner must not take its motion away.
+        let ours = movedAt != other.movedAt ? movedAt > other.movedAt : a >= b
+        (drop.moved, drop.movedAt) = ours ? (moved, movedAt) : (other.moved, other.movedAt)
         return drop
     }
 

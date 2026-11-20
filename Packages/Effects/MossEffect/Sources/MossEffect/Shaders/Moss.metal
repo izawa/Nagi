@@ -12,12 +12,16 @@ struct Instance {
     float4 quad;    // pixels
     float4 base;    // the window, or the usable area for a screen corner (pixels)
     float4 info;    // seed, growth 0…1, kind (0 window, 1 bottom-left, 2 bottom-right), fronts
-    float4 extra;   // the window's age in seconds
+    float4 extra;   // the window's age in seconds (at the chosen speed), the wind's lean −1…1
     float4 fronts[16];
 };
 
 struct Uniforms {
     float scale, cornerRadius, inward, precipitation, depth;
+    float spread;   // how far moss reaches, a share of the most (the setting)
+    float fade;     // 0 … 1 while nagi leaves
+    float dew;      // 0 … 1 on a still morning
+    float time;     // seconds
 };
 
 struct Out {
@@ -164,9 +168,13 @@ static Colony colonyAt(float s, constant Instance &patch, constant Uniforms &u) 
 
 // The cushion's cross-section: low, its crest just outside the edge. Height 0…1 at d for a
 // colony this mature.
-static float profile(float d, float maturity, float species, bool corner, float inward) {
-    float out = (species < 0.5 ? 13 : species < 1.5 ? 12 : 9) * (corner ? 1.25 : 1) * maturity;
-    float in = min(3.0, inward) * maturity;
+static float reachOut(float species, bool corner, constant Uniforms &u) {
+    return (species < 0.5 ? 13 : species < 1.5 ? 12 : 9) * (corner ? 1.25 : 1) * u.spread;
+}
+
+static float profile(float d, float maturity, float species, bool corner, constant Uniforms &u) {
+    float out = reachOut(species, corner, u) * maturity;
+    float in = min(3.0, u.inward) * u.spread * maturity;
     float crest = out * 0.25;
     float t = d > crest ? (d - crest) / max(out - crest, 1e-3) : (crest - d) / max(crest + in, 1e-3);
     return t < 1 ? sqrt(1 - t * t) : 0;
@@ -276,7 +284,7 @@ static Leaves blades(float2 q, float top, float seed) {
 
 // Sporophytes on a grown-up colony (タマゴケ): a fine reddish-brown stalk with a small round
 // brown capsule, rising as nagi deepens. Returns coverage (0…1) and writes the colour.
-static float sporophytes(float2 q, float bed, float plenty, float rise, float limit, float seed,
+static float sporophytes(float2 q, float bed, float plenty, float rise, float limit, float sway, float seed,
                          thread float3 &colour) {
     float spacing = 5.5;
     float k = floor(q.x / spacing);
@@ -285,9 +293,11 @@ static float sporophytes(float2 q, float bed, float plenty, float rise, float li
         float c = k + i;
         if (hash(float2(c, 31), seed) > plenty) continue;
         float2 base = float2((c + 0.5 + (hash(float2(c, 32), seed) - 0.5) * 0.7) * spacing, bed);
-        float tall = min((4.5 + 3.5 * hash(float2(c, 33), seed)) * (0.35 + 0.65 * rise), limit - 1 - bed);
+        // The capsule (0.6 + 1.1 points past the tip) stays within the limit too.
+        float tall = min((4.5 + 3.5 * hash(float2(c, 33), seed)) * (0.35 + 0.65 * rise), limit - 1.8 - bed);
         float lean = (hash(float2(c, 34), seed) - 0.5) * 1.2;
-        float2 tip = base + float2(lean, tall);
+        // Leaning with the wind, the taller the more (D19).
+        float2 tip = base + float2(lean + sway * tall * 0.3, tall);
         float2 st = segment(q, base, tip);
         // The stalk bows a little: offset by a curve along it.
         float2 bow = float2(0.4 * lean * st.y * (1 - st.y), 0);
@@ -315,7 +325,7 @@ static float heightAt(float2 p, constant Instance &patch, constant Uniforms &u) 
     float bump = 0;
     if (colony.species > 0.5 && colony.species < 1.5) domes(float2(f.s, f.d), colony.seed, bump);
     float tuft = colony.species > 0.5 && colony.species < 1.5 ? 0.75 + 0.35 * bump : 0.85 + 0.3 * tufts(f.s, colony.seed);
-    return profile(f.d / tuft, m, colony.species, f.corner, u.inward) * m;
+    return profile(f.d / tuft, m, colony.species, f.corner, u) * m;
 }
 
 fragment float4 mossFragment(Out in [[stage_in]], constant Instance *instances [[buffer(0)]],
@@ -347,11 +357,11 @@ fragment float4 mossFragment(Out in [[stage_in]], constant Instance *instances [
     Leaves l = colony.species > 0.5 && colony.species < 1.5 ? domes(q, colony.seed, bump) : Leaves{0, 0, 0, 0};
     // The top's outline: rounded domes, or small tufts; never a ruled line.
     float tuft = colony.species > 0.5 && colony.species < 1.5 ? 0.75 + 0.35 * bump : 0.85 + 0.3 * tufts(f.s, colony.seed);
-    float h = profile(f.d / tuft, m, colony.species, f.corner, u.inward) * m;
+    float h = profile(f.d / tuft, m, colony.species, f.corner, u) * m;
     float3 low, mid, light;
     if (colony.species < 0.5) {
         // Needle tips reach a little past the cushion.
-        float fringe = profile((f.d - 1.5) / tuft, max(m, 0.15), colony.species, f.corner, u.inward);
+        float fringe = profile((f.d - 1.5) / tuft, max(m, 0.15), colony.species, f.corner, u);
         l = h > 0 || fringe > 0 ? needles(q, colony.seed) : Leaves{0, 0, 0, 0};
         float body = smoothstep(0.0, 0.25, h);   // dense below the needles
         l.cover = max(l.cover, body * 0.9);
@@ -362,7 +372,7 @@ fragment float4 mossFragment(Out in [[stage_in]], constant Instance *instances [
         l.cover = smoothstep(0.0, 0.12, h);
         low = float3(0.030, 0.090, 0.040); mid = float3(0.110, 0.270, 0.110); light = float3(0.300, 0.470, 0.240);
     } else {
-        float top = 9 * (f.corner ? 1.25 : 1) * m * tuft + 1;
+        float top = reachOut(colony.species, f.corner, u) * m * tuft + 1;
         l = blades(q, top, colony.seed);
         // Packed below: the blades' lower parts hide what is behind.
         float packed = (1 - smoothstep(top * 0.35, top * 0.7, f.d)) * step(-1.5, f.d) * smoothstep(0.0, 0.15, m);
@@ -380,8 +390,9 @@ fragment float4 mossFragment(Out in [[stage_in]], constant Instance *instances [
         float adultAt = start + 3600 + 1800 * hash(float2(41, 1), colony.seed);
         float plenty = 0.8 * smoothstep(adultAt, adultAt + 1800, patch.extra.x) * (1 - smoothstep(0.4, 0.75, colony.spread)) * smoothstep(0.5, 0.9, f.stop);
         if (plenty > 0) {
-            float bed = 13 * (f.corner ? 1.25 : 1) * m * tuft * 0.55;
-            spore = sporophytes(q, bed, plenty, smoothstep(20.0, 120.0, u.depth), 19.5, colony.seed, sporeColour);
+            float bed = reachOut(colony.species, f.corner, u) * m * tuft * 0.55;
+            spore = sporophytes(q, bed, plenty, smoothstep(20.0, 120.0, u.depth), 19.5 * u.spread, patch.extra.y,
+                                colony.seed, sporeColour);
         }
     }
     if (l.cover <= 0 && spore <= 0) discard_fragment();
@@ -401,6 +412,30 @@ fragment float4 mossFragment(Out in [[stage_in]], constant Instance *instances [
     colour *= mix(1.0, 0.7, wet);
     colour += float3(0.6, 0.75, 0.6) * l.gloss * wet * sky * 1.5;
     float alpha = saturate(l.cover);
+    // Dew on the outer leaves on a still morning: small beads, fixed in place, that brighten and
+    // dim slowly (a period of about 15 seconds: far from the flash limit, D19).
+    if (u.dew > 0 && h > 0.25) {
+        float cell = 3.5;
+        float k = floor(f.s / cell);
+        for (int i = -1; i <= 1; i++) {
+            float c = k + i;
+            if (hash(float2(c, 51), colony.seed) > 0.3) continue;
+            float edge = reachOut(colony.species, f.corner, u) * m * tuft;
+            float2 bead = float2((c + 0.5 + (hash(float2(c, 52), colony.seed) - 0.5) * 0.6) * cell,
+                                 edge * (0.6 + 0.25 * hash(float2(c, 53), colony.seed)));
+            float r = length(q - bead) / 0.5;
+            if (r >= 1) continue;
+            float twinkle = 0.7 + 0.3 * sin(u.time * 0.42 + hash(float2(c, 54), colony.seed) * 6.283);
+            float glint = (1 - smoothstep(0.0, 0.6, length(q - bead - float2(-0.15, 0.2)) / 0.5));
+            // Within SDR white: moss asks for no extended range.
+            colour = mix(colour, min(float3(0.5, 0.65, 0.55) + float3(0.5) * glint * twinkle, float3(1.0)),
+                         u.dew * saturate((1 - r) / 0.2));
+        }
+    }
+    // Leaving: the colour drains towards a dull grey-green of the same brightness.
+    float3 dull = dot(colour, float3(0.2126, 0.7152, 0.0722)) * float3(0.95, 1.05, 0.9);
+    colour = mix(colour, dull, u.fade);
+    sporeColour = mix(sporeColour, dot(sporeColour, float3(0.2126, 0.7152, 0.0722)) * float3(1.0), u.fade);
     float4 result = float4(colour * alpha, alpha);
     // The sporophytes stand in front of the cushion.
     return float4(sporeColour * spore, spore) + result * (1 - spore);

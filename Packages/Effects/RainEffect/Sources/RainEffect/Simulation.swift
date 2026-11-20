@@ -30,6 +30,8 @@ struct RainSimulation {
     private var random: SplitMix
     private var time = 0.0
     private var backlog = 0.0
+    /// The time the latest `advance(by:)` that made steps started from: its steps are one frame's.
+    private var frameStart = 0.0
     /// Water that has run off the bottom of the glass, for the books (tests).
     private(set) var drained = 0.0
     /// Water that has arrived, for the books.
@@ -72,6 +74,15 @@ struct RainSimulation {
         for case let drop? in field.slots { body(drop) }
     }
 
+    /// Points per second `drop` went down the glass over the latest frame's steps (0 if it did not
+    /// run in them). Often more than its speed: a runner put back in a slot the step has yet to
+    /// reach is moved again in the same step, and what it takes in pulls it on. The motion blur
+    /// follows this; with the speed it covered as little as half of a frame's travel, and the
+    /// image in a runner jumped past sharp edges (a flicker, SPEC 2.2).
+    func pace(of drop: Drop) -> Double {
+        drop.movedAt > frameStart ? drop.moved / (time - frameStart) : 0
+    }
+
     /// The wet trails, piece by piece.
     var trailPieces: [TrailPiece] {
         trails.map { TrailPiece(from: $0.from, to: $0.to, halfWidth: $0.halfWidth,
@@ -90,6 +101,7 @@ struct RainSimulation {
     /// rounding error from a whole number of steps still make that number of steps.
     mutating func advance(by seconds: Double, _ settings: Settings) {
         backlog += min(max(seconds, 0), 5)
+        if backlog >= Self.step * (1 - 1e-6) { frameStart = time }
         while backlog >= Self.step * (1 - 1e-6) {
             backlog = max(backlog - Self.step, 0)
             advance(settings)
@@ -161,6 +173,7 @@ struct RainSimulation {
         // Up to speed quickly; a boost from water taken in wears off over about a second.
         drop.speed += (target - drop.speed) * min(1, dt * (drop.speed < target ? 8 : 1.2))
         let move = SIMD2(0, drop.speed * dt) + SIMD2(settings.drift * dt, 0)
+        let start = drop.center
         // In steps no longer than a quarter of the drop, taking in what it meets on the way: a
         // fast runner must not pass over a bead in one jump.
         let substeps = max(1, Int((simd_length(move) / max(drop.reach * 0.25, 0.5)).rounded(.up)))
@@ -199,6 +212,9 @@ struct RainSimulation {
         // The trail goes on from where it ended to where the runner is now, through any jump.
         layTrail(from: drop.trailEnd ?? drop.center - move, to: drop.center, size: drop.size)
         drop.trailEnd = drop.center
+        if drop.movedAt <= frameStart { drop.moved = 0 }
+        drop.movedAt = time
+        drop.moved += abs(drop.center.y - start.y)
         field.add(drop, pull: 0.55)
     }
 

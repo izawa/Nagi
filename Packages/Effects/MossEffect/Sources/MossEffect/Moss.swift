@@ -19,7 +19,14 @@ public final class Moss: Effect {
         displayName: localized("苔"),
         summary: localized("動かしていないウィンドウの縁に生える苔"),
         layer: .surface,
-        capabilities: [.windows])
+        capabilities: [.windows],
+        parameters: [
+            ParameterSpec(key: "speed", label: localized("生える速さ"), kind: .slider(range: 0.25...4, defaultValue: 1),
+                          user: .steps([.init(label: localized("ゆっくり"), value: 0.5), .init(label: localized("ふつう"), value: 1),
+                                        .init(label: localized("速い"), value: 2)])),
+            ParameterSpec(key: "spread", label: localized("広がりの上限"), kind: .slider(range: 0.5...1, defaultValue: 1),
+                          user: .slider(0.6...1)),
+        ])
 
     /// Points: how far moss reaches out from an edge and in over a window (SPEC 4.3), the window's
     /// assumed corner radius (checkpoint H), and how far down the sides the upper corners wrap.
@@ -39,7 +46,8 @@ public final class Moss: Effect {
         var quad: SIMD4<Float>
         var base: SIMD4<Float>
         var info: SIMD4<Float>
-        /// The window's age in seconds (sporophytes come with age past full growth).
+        /// The window's age in seconds at the chosen speed (sporophytes come with age past full
+        /// growth), and the wind's lean on the sporophytes here (−1…1).
         var extra: SIMD4<Float>
         var fronts: (SIMD4<Float>, SIMD4<Float>, SIMD4<Float>, SIMD4<Float>,
                      SIMD4<Float>, SIMD4<Float>, SIMD4<Float>, SIMD4<Float>,
@@ -53,6 +61,14 @@ public final class Moss: Effect {
         var inward: Float
         var precipitation: Float
         var depth: Float
+        /// How far moss reaches, as a share of the most (the setting).
+        var spread: Float
+        /// 0 … 1 while nagi leaves: the colour drains to a dull grey-green.
+        var fade: Float
+        /// 0 … 1: dew on the leaf tips on a still morning.
+        var dew: Float
+        /// Seconds, for the dew's slow twinkle.
+        var time: Float
     }
 
     /// Where moss may grow, in desktop points: a band along a window's top or a screen corner,
@@ -123,6 +139,39 @@ public final class Moss: Effect {
                 CGPoint(x: rect.minX, y: rect.maxY), CGPoint(x: rect.maxX, y: rect.maxY)].allSatisfy(inside)
     }
 
+    static func bounded(_ value: Double, _ range: ClosedRange<Double>) -> Double {
+        value.isFinite ? min(max(value, range.lowerBound), range.upperBound) : 1
+    }
+
+    /// The dew's slow twinkle (Moss.metal: `sin(time × 0.42)`), seconds.
+    static let twinklePeriod = 2 * Double.pi / 0.42
+
+    /// Millimetres per desktop point for where a gust is: one scale for the whole desktop, so a
+    /// window across two displays leans the same on both (a 5K 27-inch display's).
+    static let millimetresPerPoint = 25.4 / 218 * 2
+
+    /// How much the shared wind leans the sporophytes of a patch (−1…1): the mean wind and the
+    /// gust at the patch's middle, in the gust front's direction (D19).
+    static func lean(_ wind: Wind, at quad: CGRect) -> Double {
+        let middle = SIMD2(Double(quad.midX), Double(quad.midY)) * millimetresPerPoint
+        let push = wind.velocity.x * 0.08 + wind.gust(at: middle) * 0.6 * wind.frontDirection.x
+        return push.isFinite ? min(max(push, -1), 1) : 0
+    }
+
+    /// Dew on a still morning (M3-PLAN 5.3): the sun low in the east, up to about 20° high; less
+    /// under rain; it comes as nagi deepens.
+    static func dew(sun: CelestialPosition, depth: Double, precipitation: Double) -> Double {
+        func smooth(_ a: Double, _ b: Double, _ x: Double) -> Double {
+            let t = min(max((x - a) / (b - a), 0), 1)
+            return t * t * (3 - 2 * t)
+        }
+        let degrees = sun.altitude * 180 / .pi
+        // East of the meridian, fading to none as the sun reaches it (low winter suns stay low).
+        let morning = sun.azimuth > 0 && sun.azimuth < .pi ? sin(sun.azimuth) : 0
+        return smooth(0, 4, degrees) * (1 - smooth(14, 22, degrees)) * morning * smooth(30, 120, depth)
+            * (1 - 0.8 * min(max(precipitation, 0), 1))
+    }
+
     private let pipeline: any MTLRenderPipelineState
     private let device: any MTLDevice
 
@@ -137,7 +186,23 @@ public final class Moss: Effect {
         pipeline = try context.device.makeRenderPipelineState(descriptor: descriptor)
     }
 
-    public func update(_ frame: FrameState) {}
+    /// The presence when nagi began to leave: the colour drains from what was on screen then, even
+    /// if the entry had not finished.
+    private var leavingFrom: Double?
+
+    public func update(_ frame: FrameState) {
+        if frame.phase == .leaving {
+            if leavingFrom == nil { leavingFrom = max(frame.presence, 1e-3) }
+        } else {
+            leavingFrom = nil
+        }
+    }
+
+    /// 0 … 1 over the leaving: how far the colour has drained.
+    private func fade(_ frame: FrameState) -> Double {
+        guard frame.phase == .leaving, let from = leavingFrom else { return 0 }
+        return 1 - min(max(frame.presence / from, 0), 1)
+    }
 
     public func render(_ frame: FrameState, view: DisplayView, encoder: any EffectEncoder) throws {
         guard let snapshot = frame.windows else { return }
@@ -147,23 +212,37 @@ public final class Moss: Effect {
                   Float(rect.maxX - origin.x), Float(rect.maxY - origin.y)) * Float(scale)
         }
         // Back to front, so where two windows' moss meet outside both, the front one's lies on top.
-        let visible = Self.patches(snapshot).reversed().filter { $0.quad.intersects(view.frameInDesktop) && Self.growth(age: $0.age) > 0 }
+        let speed = Self.bounded(frame.number("speed", default: 1), 0.25...4)
+        let visible = Self.patches(snapshot).reversed().filter {
+            $0.quad.intersects(view.frameInDesktop) && Self.growth(age: $0.age * speed) > 0
+        }
+        let wind = frame.accessibility.reduceMotion ? nil : frame.environment.wind
         guard !visible.isEmpty else { return }
         var instances = visible.map { patch -> Instance in
             var fronts = [SIMD4<Float>](repeating: .zero, count: Self.frontCapacity)
             for (slot, rect) in patch.fronts.prefix(Self.frontCapacity).enumerated() { fronts[slot] = pixels(rect) }
+            let age = patch.age * speed
             return Instance(quad: pixels(patch.quad), base: pixels(patch.base),
-                            info: SIMD4(Float(patch.seed % 65536), Float(Self.growth(age: patch.age)),
+                            info: SIMD4(Float(patch.seed % 65536), Float(Self.growth(age: age)),
                                         Float(patch.kind.rawValue), Float(min(patch.fronts.count, Self.frontCapacity))),
-                            extra: SIMD4(Float(patch.age.isFinite ? min(patch.age, 1e7) : 0), 0, 0, 0),
+                            extra: SIMD4(Float(age.isFinite ? min(age, 1e7) : 0),
+                                         // Along the edge: the bottom-right corner runs right to left.
+                                         Float((wind.map { Self.lean($0, at: patch.quad) } ?? 0) * (patch.kind == .bottomRight ? -1 : 1)),
+                                         0, 0),
                             fronts: (fronts[0], fronts[1], fronts[2], fronts[3], fronts[4], fronts[5], fronts[6], fronts[7],
                                      fronts[8], fronts[9], fronts[10], fronts[11], fronts[12], fronts[13], fronts[14], fronts[15]))
         }
         guard let buffer = device.makeBuffer(bytes: &instances, length: MemoryLayout<Instance>.stride * instances.count,
                                              options: .storageModeShared) else { return }
+        let depth = frame.depth.isFinite ? frame.depth : 0
         var uniforms = Uniforms(scale: Float(scale), cornerRadius: Float(Self.cornerRadius), inward: Float(Self.inward),
-                                precipitation: Float(frame.environment.precipitation),
-                                depth: Float(frame.depth.isFinite ? frame.depth : 0))
+                                precipitation: Float(frame.environment.precipitation), depth: Float(depth),
+                                spread: Float(Self.bounded(frame.number("spread", default: 1), 0.5...1)),
+                                fade: Float(fade(frame)),
+                                dew: Float(Self.dew(sun: frame.environment.sun, depth: depth,
+                                                    precipitation: frame.environment.precipitation)),
+                                // Wrapped at a whole number of twinkles, so the dew never jumps.
+                                time: Float(frame.time.truncatingRemainder(dividingBy: Self.twinklePeriod * 200)))
         var size = SIMD2<Float>(Float(encoder.outputSize.x), Float(encoder.outputSize.y))
         encoder.renderToOutput { pass in
             pass.setRenderPipelineState(pipeline)

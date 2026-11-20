@@ -90,6 +90,32 @@ struct SimulationTests {
         #expect(moved.area <= Double.pi * 121)                     // it did not swell with the water
     }
 
+    /// The motion blur spans how far a runner went in the step, which can be more than its
+    /// speed: put back in a free slot further on, it is moved again in the same step.
+    @Test func paceIsTheDistanceGone() {
+        let calm = RainSimulation.Settings(depth: 0, intensity: 0.0001, size: 1)
+        var simulation = RainSimulation(displays: [CGRect(x: 0, y: 0, width: 400, height: 1400)], settings: calm, seed: 1)
+        var field = DropField()
+        var runner = Drop(center: SIMD2(200, 50), radius: 11, shape: 0)
+        runner.heldUntil = 0
+        field.add(runner, pull: 0)
+        field.add(Drop(center: SIMD2(50, 1000), radius: 2, shape: 0), pull: 0)
+        field.remove(field.add(Drop(center: SIMD2(350, 1000), radius: 2, shape: 0), pull: 0))   // free, after the runner
+        simulation.replaceField(field)
+        func runnerNow() -> Drop { simulation.drops.max { $0.area < $1.area }! }
+        let before = runnerNow()
+        #expect(simulation.pace(of: before) == 0)                 // not run yet
+        simulation.advance(by: 1.0 / 60, calm)
+        let after = runnerNow()
+        let gone = after.center.y - before.center.y
+        #expect(abs(simulation.pace(of: after) * RainSimulation.step - gone) < 1e-9)
+        #expect(gone > after.speed * RainSimulation.step * 1.5)  // moved twice
+        // A frame of two steps (30 fps): the pace is over both.
+        simulation.advance(by: 2.0 / 60, calm)
+        let later = runnerNow()
+        #expect(abs(simulation.pace(of: later) * 2 * RainSimulation.step - (later.center.y - after.center.y)) < 1e-9)
+    }
+
     /// While nagi leaves no new drops land; with fewer drops asked for, the glass holds about half.
     @Test func arrivalsFollowSettings() {
         var leaving = downpour
