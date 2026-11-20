@@ -21,11 +21,17 @@ public struct FrameState: Sendable {
     public var parameters: [String: ParameterValue]
     public var seed: UInt64
     public var environment: SharedEnvironment
+    /// The displays of the desktop, in points, top-left origin (DisplayView.frameInDesktop): a
+    /// simulation spread over the desktop knows where it can be seen before any display draws.
+    public var displays: [CGRect]
+    /// Counts the times nagi has shown: a new value means a new showing, so an effect with state
+    /// (rain's drops) can start over.
+    public var showing: Int
 
     public init(time: TimeInterval, deltaTime: TimeInterval, date: Date, phase: NagiPhase, presence: Double,
                 depth: Double, appearance: Appearance, quality: Quality = .standard,
                 accessibility: AccessibilityAdjustments = .init(), parameters: [String: ParameterValue] = [:],
-                seed: UInt64, environment: SharedEnvironment = .init()) {
+                seed: UInt64, environment: SharedEnvironment = .init(), displays: [CGRect] = [], showing: Int = 0) {
         self.time = time
         self.deltaTime = deltaTime
         self.date = date
@@ -38,6 +44,8 @@ public struct FrameState: Sendable {
         self.parameters = parameters
         self.seed = seed
         self.environment = environment
+        self.displays = displays
+        self.showing = showing
     }
 
     public func number(_ key: String, default value: Double) -> Double {

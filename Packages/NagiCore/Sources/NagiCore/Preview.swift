@@ -15,6 +15,8 @@ public struct PreviewScene: Sendable {
     public var appearance: Appearance
     /// As the desktop does (SPEC 2.2): Reduce Motion halves the wind's clock.
     public var accessibility = AccessibilityAdjustments()
+    /// The displays the frame is drawn on (FrameState.displays): the preview's one view.
+    public var displays: [CGRect] = []
 
     public init(date: Date, location: GeoLocation? = nil, windTime: Double = 0, seed: UInt64 = 1,
                 weather: EnvironmentModel.Weather = .init(sky: .clear), appearance: Appearance = .light) {
@@ -34,7 +36,8 @@ public struct PreviewScene: Sendable {
         return FrameState(time: time, deltaTime: deltaTime, date: date, phase: phase, presence: presence,
                           depth: depth, appearance: appearance, accessibility: accessibility, seed: seed,
                           environment: EnvironmentModel.environment(at: date, location: location, windTime: time,
-                                                                    seed: seed, weather: weather))
+                                                                    seed: seed, weather: weather),
+                          displays: displays)
     }
 
     /// The display a preview draws on, at 2× (a Retina display), of a given physical size; the

@@ -11,11 +11,14 @@ struct MenuContent: View {
         // The effects' notes (after sunset, komorebi shows nothing): informational, not a command.
         ForEach(delegate.notes.lines, id: \.self) { Text($0) }
         if !delegate.notes.lines.isEmpty { Divider() }
-        EffectToggles(store: store)
+        EffectToggles(store: store, screenRecording: delegate.screenRecording) { delegate.showSettings(tab: .permissions) }
+        Toggle(String(localized: "1 つを選んで出す", bundle: .module), isOn: Binding(
+            get: { store.settings.effectMode == .random },
+            set: { on in store.update { $0.effectMode = on ? .random : .all } }))
         Divider()
         Button(String(localized: "今すぐ見る", bundle: .module)) { delegate.engine?.preview() }
             .disabled(delegate.windowsHoldOff || store.settings.strength <= 0
-                || !store.settings.anyEnabled(store.effects) || store.settings.isPaused(at: Date()))
+                || !(delegate.engine?.hasRunnableEffect ?? false) || store.settings.isPaused(at: Date()))
         pause
         Divider()
         Button(String(localized: "設定…", bundle: .module)) { delegate.showSettings() }
@@ -68,17 +71,29 @@ struct MenuContent: View {
 /// A switch per effect (the menu and the first-launch guide).
 struct EffectToggles: View {
     let store: SettingsStore
+    let screenRecording: ScreenRecording
+    /// Shows why an effect needs a permission and how to give it.
+    let explainPermission: () -> Void
     var body: some View {
         ForEach(store.descriptors, id: \.id) { descriptor in
-            Toggle(isOn: Binding(get: { store.settings.isEnabled(descriptor.id) },
-                                 set: { on in store.update { $0.setEnabled(descriptor.id, on, among: store.effects) } })) {
-                Text(descriptor.displayName)
+            Toggle(isOn: Binding(get: { store.settings.isEnabled(descriptor.id, among: store.effects) },
+                                 set: { on in
+                                     store.update { $0.setEnabled(descriptor.id, on, among: store.effects) }
+                                     if on, screenRecording.needsExplaining(descriptor) { explainPermission() }
+                                 })) {
+                // Offered even without its permission, saying what it needs (SPEC 2.3).
+                if descriptor.capabilities.contains(.backdrop), screenRecording.state != .granted {
+                    Text(String(format: String(localized: "%@(画面収録の許可が必要)", bundle: .module),
+                                String(localized: descriptor.displayName)))
+                } else {
+                    Text(descriptor.displayName)
+                }
             }
         }
     }
 }
 
-/// The menu-bar icon: a leaf, with a pause mark while paused.
+/// The menu-bar icon: a drop over its ripples; while paused, only the still water (D30).
 struct MenuIcon: View {
     let store: SettingsStore
     var body: some View {
@@ -98,12 +113,8 @@ extension NagiSettings {
         }
     }
 
-    func anyEnabled(_ types: [any Effect.Type]) -> Bool {
-        types.contains { isEnabled($0.descriptor.id) }
-    }
-
     mutating func setEnabled(_ id: String, _ on: Bool, among types: [any Effect.Type]) {
-        var ids = enabledEffects ?? types.map { $0.descriptor.id }
+        var ids = enabledEffects ?? Self.defaultEnabled(types)
         ids.removeAll { $0 == id }
         if on { ids.append(id) }
         enabledEffects = ids

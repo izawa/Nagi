@@ -370,6 +370,156 @@
           }
         }
       }
+    },
+    "%@(画面収録の許可が必要)": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ (Needs Screen Recording)"
+          }
+        }
+      }
+    },
+    "1 つを選ぶ": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "One at Random"
+          }
+        }
+      }
+    },
+    "エフェクトの出し方": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Effects Shown"
+          }
+        }
+      }
+    },
+    "オンのものを重ねる": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "All That Are On"
+          }
+        }
+      }
+    },
+    "システム設定の「画面収録とシステムオーディオ録音」で凪をオンにし、凪を起動し直してください。": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Turn on Nagi in Screen & System Audio Recording in System Settings, then quit and reopen Nagi."
+          }
+        }
+      }
+    },
+    "システム設定を開く": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Open System Settings"
+          }
+        }
+      }
+    },
+    "取り込んでいるあいだは、メニューバーに紫の印が出ます。macOS が、ときどき許可を続けるか確かめることがあります。": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "While Nagi captures the screen, a purple indicator appears in the menu bar. macOS may ask from time to time whether to keep allowing it."
+          }
+        }
+      }
+    },
+    "権限": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Permissions"
+          }
+        }
+      }
+    },
+    "画面収録": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Screen Recording"
+          }
+        }
+      }
+    },
+    "画面収録を許可していないため、%@は出ません": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ doesn’t show without Screen Recording permission"
+          }
+        }
+      }
+    },
+    "許可しています": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Allowed"
+          }
+        }
+      }
+    },
+    "許可を求める": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ask for Permission"
+          }
+        }
+      }
+    },
+    "雨は、後ろの画面を雨粒で屈折させるために、画面収録の許可を使います。取り込むのは凪が出ているあいだだけで、取り込んだ画面は Mac の GPU の中だけで使い、保存も送信もしません。": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Rain uses Screen Recording to bend the screen behind its drops. Nagi captures the screen only while it shows, uses it only on your Mac’s GPU, and never saves or sends it."
+          }
+        }
+      }
+    },
+    "1 つを選んで出す": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Show One at Random"
+          }
+        }
+      }
+    },
+    "返事を待っています": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Waiting for Your Answer"
+          }
+        }
+      }
     }
   },
   "version": "1.0"

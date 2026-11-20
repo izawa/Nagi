@@ -17,6 +17,11 @@ struct NagiSettings: Codable, Equatable {
         var growthRate: Double { self == .normal ? 1 : 0.5 }
     }
 
+    /// How the enabled effects show (SPEC 2.3): all layered, or one drawn at random.
+    enum EffectMode: String, Codable, CaseIterable {
+        case all, random
+    }
+
     enum LowPower: String, Codable, CaseIterable {
         /// Draw at 30 fps instead of 60 (one quality step lower, SPEC 2.2).
         case reduceFrameRate
@@ -25,7 +30,12 @@ struct NagiSettings: Codable, Equatable {
 
     var schema = Self.currentSchema
     var onboarded = false
+    /// The effects the user turned on. Nil (a file from before M2, or none yet) means the
+    /// effects that need no permission (`defaultEnabled`): adding rain must not turn it on.
     var enabledEffects: [String]?
+    var effectMode = EffectMode.all
+    /// Screen Recording was asked for once (the system shows its dialog only the first time).
+    var screenRecordingAsked = false
     var pause = Pause.none
     var onsetSeconds = 3.0
     var deepening = Deepening.normal
@@ -48,6 +58,8 @@ struct NagiSettings: Codable, Equatable {
         onboarded = value(.onboarded, defaults.onboarded)
         // Entry by entry: a damaged entry must not turn the list into "all effects on" (nil).
         enabledEffects = value(.enabledEffects, [LenientID]?.none)?.compactMap(\.id)
+        effectMode = value(.effectMode, defaults.effectMode)
+        screenRecordingAsked = value(.screenRecordingAsked, defaults.screenRecordingAsked)
         pause = value(.pause, defaults.pause)
         onsetSeconds = value(.onsetSeconds, defaults.onsetSeconds)
         deepening = value(.deepening, defaults.deepening)
@@ -69,7 +81,7 @@ struct NagiSettings: Codable, Equatable {
         valid.strength = strength.isFinite ? min(max(strength, 0), 1) : 1
         if case let .until(date) = pause, date <= now { valid.pause = .none }
         let ids = Set(types.map { $0.descriptor.id })
-        valid.enabledEffects = enabledEffects?.filter { ids.contains($0) }
+        valid.enabledEffects = (enabledEffects ?? Self.defaultEnabled(types)).filter { ids.contains($0) }
         valid.effects = [:]
         for type in types {
             let specs = type.descriptor.parameters.filter { $0.user != nil }
@@ -83,7 +95,15 @@ struct NagiSettings: Codable, Equatable {
         return valid
     }
 
-    func isEnabled(_ id: String) -> Bool { enabledEffects?.contains(id) ?? true }
+    /// Valid settings always hold a list; before validation, nil reads as `defaultEnabled`.
+    func isEnabled(_ id: String, among types: [any Effect.Type]) -> Bool {
+        (enabledEffects ?? Self.defaultEnabled(types)).contains(id)
+    }
+
+    /// On by default: the effects that need no permission (SPEC 5: rain is for those who allow it).
+    static func defaultEnabled(_ types: [any Effect.Type]) -> [String] {
+        types.filter { !$0.descriptor.capabilities.contains(.backdrop) }.map { $0.descriptor.id }
+    }
 }
 
 /// A saved effect ID, or nil if the entry is not a string.

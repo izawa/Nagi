@@ -73,11 +73,12 @@ import SwiftUI
         // Paused, a still picture: redraw a few times a second to follow the controls, not 60.
         if !model.playing, timestamp - lastDrawn < 0.2 { return }
         lastDrawn = timestamp
-        let frame = model.advance(by: seconds)
         renderer.parameters[model.effect.descriptor.id] = model.parameters
         let width = model.widthMillimetres
         let view = PreviewScene.display(pixels: Self.pixels,
                                         physicalSize: SIMD2(width, width * Double(Self.pixels.y) / Double(Self.pixels.x)))
+        var frame = model.advance(by: seconds)
+        frame.displays = [view.frameInDesktop]
         do {
             let background = try background(for: model.fixture)
             guard let commandBuffer = renderer.queue.makeCommandBuffer() else { return }

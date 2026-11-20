@@ -24,9 +24,13 @@ import UniformTypeIdentifiers
     }
 
     /// The premultiplied linear overlay alone (what the live path hands to WindowServer).
-    public func renderOverlay(_ frame: FrameState, view: DisplayView, strength: Double = 1) throws -> any MTLTexture {
+    public func renderOverlay(_ frame: FrameState, view: DisplayView, strength: Double = 1,
+                              background: Background? = nil) throws -> any MTLTexture {
         let overlay = try makeTexture(size: view.pixelSize, storage: .shared)
         guard let commandBuffer = queue.makeCommandBuffer() else { throw NagiCoreError("no command buffer") }
+        // `.backdrop` effects see the background, as in `renderOffscreen`.
+        var view = view
+        if view.backdrop == nil, let background { view.backdrop = try background.makeTexture(size: view.pixelSize, renderer: self) }
         update(frame)
         try encode(frame, view: view, strength: strength, into: overlay, commandBuffer: commandBuffer)
         commandBuffer.commit()

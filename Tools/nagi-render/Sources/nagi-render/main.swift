@@ -4,7 +4,8 @@
 //   nagi-render komorebi --at 2026-06-21T12:00:00+09:00 --depth 35 --presence 1 --appearance light \
 //     --seed 42 --background gray:0.9 --size 1600x1000 --physical-mm 400x250 --output noon.png
 //
-// Effects: the app's catalog, plus "patch" (a flat premultiplied colour, for calibration).
+// Effects: the app's catalog, plus "patch" (a flat premultiplied colour, for calibration) and
+// "lens" (magnifies the background, as the screen capture will feed it).
 // --param key=value sets an effect parameter (number, true/false, or a choice key).
 
 import CoreGraphics
@@ -22,7 +23,7 @@ import NagiKit
     arguments.removeFirst()
     let options = try Options(arguments)
 
-    let available: [any Effect.Type] = EffectCatalog.all + [PatchEffect.self]
+    let available: [any Effect.Type] = EffectCatalog.all + [PatchEffect.self, LensEffect.self]
     let ids = effectList.split(separator: ",").map(String.init)
     guard Set(ids).count == ids.count else { throw NagiCoreError("an effect is listed twice") }
     let types = try ids.map { id in
@@ -39,8 +40,9 @@ import NagiKit
     // The same weather hints the live engine mixes in (NagiEngine).
     var weather = options.weather
     weather.cloudBias = types.compactMap { $0.descriptor.weatherHint?.cloudBias }.reduce(0, +)
-    let scene = PreviewScene(date: options.date, location: options.location, windTime: options.time, seed: options.seed,
+    var scene = PreviewScene(date: options.date, location: options.location, windTime: options.time, seed: options.seed,
                              weather: weather, appearance: options.appearance)
+    scene.displays = [view.frameInDesktop]
     let deltaTime = options.frames == 1 ? 1.0 / 60 : 1.0 / options.fps
     var replay = options.inputAt.map { EnvelopeReplay(inputAt: $0) }
     for index in 0..<options.frames {
@@ -54,7 +56,8 @@ import NagiKit
             let output = options.outputURL(for: index)
             if options.debugAlpha {
                 // Stretch each frame's alpha so its peak is white.
-                let overlay = try renderer.renderOverlay(frame, view: view, strength: options.strength)
+                let overlay = try renderer.renderOverlay(frame, view: view, strength: options.strength,
+                                                        background: options.background)
                 try writeAlpha(TextureReader.pixels(of: overlay), size: options.size, to: output)
             } else {
                 let screen = try renderer.renderOffscreen(frame, view: view, strength: options.strength, background: options.background)

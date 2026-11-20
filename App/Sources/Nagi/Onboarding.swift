@@ -5,6 +5,8 @@ import SwiftUI
 struct OnboardingView: View {
     let store: SettingsStore
     let login: LoginItem
+    let screenRecording: ScreenRecording
+    let explainPermission: () -> Void
     let done: () -> Void
 
     var body: some View {
@@ -15,7 +17,7 @@ struct OnboardingView: View {
             Text(String(localized: "日の光で描くので、日が沈むと現れません。月が出ている夜は、月明かりで薄く現れます。", bundle: .module))
             Text(String(localized: "一時停止と設定は、メニューバーのしずくのアイコンから開けます。", bundle: .module))
             Form {
-                EffectToggles(store: store)
+                EffectToggles(store: store, screenRecording: screenRecording, explainPermission: explainPermission)
                 LoginItemSection(login: login)
             }
             .formStyle(.grouped)

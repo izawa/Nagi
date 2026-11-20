@@ -15,8 +15,41 @@ import QuartzCore
     public var location: GeoLocation?
     /// A fixed wall-clock date for the sun (stop B looks at daylight in the evening).
     public var pinnedDate: Date?
-    /// The weather hints of the effects, and debug overrides of the sky (EnvironmentModel.Weather).
+    /// Debug overrides of the sky (EnvironmentModel.Weather). The cloud bias comes from the
+    /// effects running in the showing.
     public var weather = EnvironmentModel.Weather()
+    /// Which effects run (SPEC 2.3): the user's choice and the mode. Applied when nagi next shows.
+    /// Also holds random mode's draw, which changes without a new choice.
+    public private(set) var selection = EffectSelection()
+
+    public func setEffects(enabled: Set<String>, mode: EffectSelection.Mode) {
+        selection.enabled = enabled
+        selection.mode = mode
+        if !configuring { sample() }
+    }
+
+    /// Whether effects that need the screen behind them (`.backdrop`) can run: Screen Recording.
+    /// Read at most once a second (it asks the system).
+    public var permitsBackdrop: () -> Bool = { BackdropCapture.isPermitted }
+    private var permitted = (value: false, at: -Double.infinity)
+
+    /// The permission may have changed (the app saw an answer): read it again now.
+    public func recheckPermissions() {
+        permitted.at = -Double.infinity
+        if !configuring { sample() }
+    }
+
+    /// Some enabled effect can run now (the menu's "see it now").
+    public var hasRunnableEffect: Bool {
+        !selection.eligible(in: renderer.effectIDs, unavailable: unavailableEffects).isEmpty
+    }
+    /// The enabled effects that cannot run now, and why: only a missing permission so far.
+    public var unavailableEffects: Set<String> {
+        let now = Self.now
+        if now - permitted.at >= 1 { permitted = (permitsBackdrop(), now) }
+        return permitted.value ? [] : Set(renderer.descriptors.filter { $0.capabilities.contains(.backdrop) }.map(\.id))
+    }
+    private var random = SystemRandomNumberGenerator()
     /// Debug: start a cloud crossing the sun each time nagi shows (CloudModel.pass).
     public var cloudPassEachShowing = false
     public var suppressDuringMedia = true
@@ -54,7 +87,10 @@ import QuartzCore
     /// The highest frame rate, changed while running (Low Power Mode, D26).
     public var frameRateCap: Float {
         get { overlays.frameRateCap }
-        set { overlays.frameRateCap = newValue }
+        set {
+            overlays.frameRateCap = newValue
+            capture.framesPerSecond = Int(newValue)  // the next capture; no point capturing faster than drawing
+        }
     }
     public var sharingType: NSWindow.SharingType {
         get { overlays.sharingType }
@@ -64,6 +100,13 @@ import QuartzCore
 
     private var machine: NagiStateMachine
     private let overlays: OverlayController
+    /// The screen behind the overlays, for `.backdrop` effects, only while nagi shows (SPEC 3.9).
+    private let capture: BackdropCapture
+    private var needsBackdrop = false
+    /// The effects of the current showing (empty while hidden).
+    private var running: [String] = []
+    /// The displays being captured, to restart only when they change.
+    private var capturedDisplays: [UInt32: SIMD2<Int>] = [:]
     private let signals = SystemSignals()
     private var output: NagiOutput?
     private var wakeTimer: Timer?
@@ -83,6 +126,8 @@ import QuartzCore
     /// machine has gone back to active, so a fade cannot bring it back.
     private var forcedDown = false
     private var framesThisShowing = 0
+    /// How many times nagi has shown (FrameState.showing).
+    private var showings = 0
     /// GPU milliseconds of recent frames, logged every few seconds with `--trace` (M1-PLAN 7.3).
     private let gpuTimes = GPUTimes()
     /// Intervals between presented frames on the driver display (trace only).
@@ -98,8 +143,9 @@ import QuartzCore
                 measurement: MeasurementOptions = .init()) throws {
         guard let device = MTLCreateSystemDefaultDevice() else { throw NagiCoreError("no Metal device") }
         renderer = try FrameRenderer(device: device, effects: effects)
-        weather.cloudBias = effects.compactMap { $0.descriptor.weatherHint?.cloudBias }.reduce(0, +)
         overlays = OverlayController(device: device, measurement: measurement)
+        var captureLog: (@MainActor (String) -> Void)?
+        capture = BackdropCapture(device: device) { captureLog?($0) }
         self.measurement = measurement
         machine = NagiStateMachine(timing: timing)
         let trace = trace ? Logger(subsystem: "org.izawa.Nagi", category: "trace") : nil
@@ -110,6 +156,8 @@ import QuartzCore
         overlays.onFrame = { [weak self] display, update in self?.drawFrame(display: display, update: update) }
         overlays.onRemove = { [weak self] display in self?.renderer.forget(display: display) }
         signals.onChange = { [weak self] in self?.sample() }
+        captureLog = { [weak self] in self?.log($0) }
+        capture.onStop = { [weak self] reason in self?.captureStopped(reason) }
         cleanUp = { [weak self] generation in
             guard let self, self.overlays.isShown, self.withdrawalGuard.isCurrent(generation) else { return }
             self.forceDown(reason: "guard cleanup")
@@ -119,7 +167,10 @@ import QuartzCore
             MainActor.assumeIsolated {
                 guard let self else { return }
                 self.overlays.rebuild()
-                if self.overlays.isShown { self.withdrawalGuard.replace(self.overlays.layers) }
+                if self.overlays.isShown {
+                    self.withdrawalGuard.replace(self.overlays.layers)
+                    if self.output?.phase != .leaving { self.startCapture() }
+                }
             }
         }
     }
@@ -133,12 +184,15 @@ import QuartzCore
         sample()
     }
 
-    /// What the effects say about now (Effect.note): after sunset, komorebi shows nothing.
+    /// What the effects say about now (Effect.note): after sunset, komorebi shows nothing. The
+    /// effects of the showing, or while hidden those that would run.
     public func notes() -> [LocalizedStringResource] {
         let date = pinnedDate ?? Date()
         let frame = FrameState(time: Self.now, deltaTime: 0, date: date, phase: .calm, presence: 1, depth: 0,
                                appearance: Self.appearance, seed: 1, environment: environment(at: date))
-        return renderer.notes(frame)
+        let ids = overlays.isShown ? running
+            : selection.upcoming(order: renderer.effectIDs, unavailable: unavailableEffects, now: Self.now)
+        return renderer.notes(frame, of: Set(ids))
     }
 
     private func environment(at date: Date) -> SharedEnvironment {
@@ -176,20 +230,29 @@ import QuartzCore
             mediaActive = SystemSignals.mediaActive()
             mediaCheckedAt = now
         }
-        let paused = heldOff || (pausedUntil.map { $0 > Date() } ?? false)
+        // While shown, the showing's effects; a lost permission removes its effects at once.
+        if overlays.isShown { dropUnavailable() }
+        let noEffect = overlays.isShown ? running.isEmpty : !hasRunnableEffect
+        let paused = heldOff || noEffect || (pausedUntil.map { $0 > Date() } ?? false)
         let inputs = NagiInputs(now: now, idleReading: SystemSignals.idleReading(), paused: paused,
                                 screenUnavailable: signals.screenUnavailable, mediaActive: mediaActive,
                                 suppressDuringMedia: suppressDuringMedia)
         let previous = output
         let next = machine.step(inputs)
         output = next
-        if previous?.phase != next.phase { log("phase \(String(describing: next.phase))") }
+        if previous?.phase != next.phase {
+            log("phase \(String(describing: next.phase))")
+            // Leaving: the drops evaporate over the last frame seen (M2-PLAN 4.1).
+            if next.phase == .leaving { capture.freeze() }
+        }
 
         if forcedDown, next.phase == .active { forcedDown = false }
         if next.showsOverlay, !overlays.isShown, !forcedDown {
             frame = nil
+            chooseEffects(at: now)
             withdrawalGuard.arm(overlays.layers, reading: inputs.idleReading, at: now)
             overlays.show()
+            startCapture()
             log("shown")
         } else if !next.showsOverlay, overlays.isShown {
             hide(reason: "hidden")
@@ -199,9 +262,64 @@ import QuartzCore
         return next
     }
 
+    /// Decides the effects of the showing that starts now, and what follows from them.
+    private func chooseEffects(at now: Double) {
+        running = selection.resolve(order: renderer.effectIDs, unavailable: unavailableEffects, now: now,
+                                    using: &random)
+        showings += 1
+        applyRunning()
+    }
+
+    /// Follows the running effects: what draws, the clouds they ask for, whether to capture.
+    private func applyRunning() {
+        renderer.disabledIDs = Set(renderer.effectIDs).subtracting(running)
+        let descriptors = renderer.descriptors.filter { running.contains($0.id) }
+        weather.cloudBias = descriptors.compactMap { $0.weatherHint?.cloudBias }.reduce(0, +)
+        needsBackdrop = descriptors.contains { $0.capabilities.contains(.backdrop) }
+        if !needsBackdrop { stopCapture() }
+        log("effects \(running)")
+    }
+
+    /// Removes from the showing the effects that can no longer run (Screen Recording revoked:
+    /// macOS may keep delivering frames after "Later", SPEC 3.9). An empty showing withdraws.
+    private func dropUnavailable() {
+        let unavailable = unavailableEffects
+        guard running.contains(where: unavailable.contains) else { return }
+        running.removeAll(where: unavailable.contains)
+        applyRunning()
+    }
+
+    /// Captures the overlays' displays at their drawable size, unless already doing so.
+    private func startCapture() {
+        guard needsBackdrop else { return }
+        let displays = overlays.overlays.mapValues(\.view.pixelSize)
+        guard displays != capturedDisplays else { return }
+        capturedDisplays = displays
+        capture.start(displays: displays)
+    }
+
+    private func stopCapture() {
+        capture.stop()
+        capturedDisplays = [:]
+    }
+
+    /// Capture ended on its own. Stopped by the user from the menu-bar indicator: not again this
+    /// showing. Not permitted: the backdrop effects cannot run.
+    private func captureStopped(_ reason: BackdropCapture.Stop) {
+        capturedDisplays = [:]
+        if case .notPermitted = reason { permitted = (false, Self.now) }
+        // Without the screen behind them, the backdrop effects cannot draw for the rest of this
+        // showing; an empty showing withdraws at the next sample.
+        let backdrop = Set(renderer.descriptors.filter { $0.capabilities.contains(.backdrop) }.map(\.id))
+        running.removeAll(where: backdrop.contains)
+        applyRunning()
+    }
+
     private func hide(reason: String) {
         withdrawalGuard.disarm()
         overlays.hide()
+        stopCapture()
+        running = []
         renderer.releaseResources()
         watchdog?.invalidate()
         watchdog = nil
@@ -235,8 +353,13 @@ import QuartzCore
             return  // the screen-state notification wakes us
         } else if inputs.paused {
             // Releasing the gallery's hold, or resuming, samples again.
-            guard !heldOff, let until = pausedUntil, until != .distantFuture else { return }
-            interval = until.timeIntervalSinceNow
+            guard !heldOff else { return }
+            if let until = pausedUntil, until > Date() {
+                guard until != .distantFuture else { return }
+                interval = until.timeIntervalSinceNow
+            } else {
+                interval = 5  // no effect can run (a permission): look again now and then
+            }
         } else if let wake = output.nextWake, wake > now {
             interval = wake - now
         } else {
@@ -271,7 +394,7 @@ import QuartzCore
     private func drawFrame(display: UInt32, update: CAMetalDisplayLink.Update) {
         let wasShown = overlays.isShown
         let output = sample()
-        guard overlays.isShown, let view = overlays.overlays[display]?.view else {
+        guard overlays.isShown, var view = overlays.overlays[display]?.view else {
             // Hiding inside this very sample is normal; a frame that finds nagi already down is not.
             if !wasShown { log("frame while hidden") }
             return
@@ -293,7 +416,8 @@ import QuartzCore
             frame = FrameState(
                 time: now, deltaTime: deltaTime, date: date, phase: output.phase.framePhase,
                 presence: output.presence, depth: shownDepth, appearance: Self.appearance,
-                accessibility: accessibility, seed: 1, environment: environment(at: date))
+                accessibility: accessibility, seed: 1, environment: environment(at: date),
+                displays: overlays.overlays.values.map(\.view.frameInDesktop), showing: showings)
             renderer.update(frame)
             self.frame = frame
         } else {
@@ -303,6 +427,8 @@ import QuartzCore
             frame = latest
         }
         guard let commandBuffer = renderer.queue.makeCommandBuffer() else { return }
+        // No frame yet: `.backdrop` effects draw nothing, and appear with the first one.
+        if needsBackdrop { view.backdrop = capture.backdrop(for: display, commandBuffer: commandBuffer) }
         if measurement.emptyFrames {
             let pass = MTLRenderPassDescriptor()
             pass.colorAttachments[0].texture = update.drawable.texture

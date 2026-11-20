@@ -51,6 +51,20 @@ struct SettingsTests {
         #expect(try decode("{}").enabledEffects == nil)
     }
 
+    /// A file from before M2 (no list) turns on only the effects that need no permission, and the
+    /// first switch starts from that list: adding rain never turns it on by itself (M2-PLAN 4.3).
+    @Test func effectsNeedingPermissionStartOff() throws {
+        let types: [any Effect.Type] = effects + [GlassStub.self]
+        let old = try decode("{}").validated(effects: types)
+        #expect(old.enabledEffects == ["komorebi"])
+        var switched = try decode("{}")
+        switched.setEnabled("komorebi", false, among: types)
+        #expect(switched.enabledEffects == [])
+        #expect(!NagiSettings().isEnabled("test.glass", among: types))
+        #expect(try decode(#"{"enabledEffects": ["test.glass"]}"#).validated(effects: types).enabledEffects == ["test.glass"])
+        #expect(try decode("{}").effectMode == .all)
+    }
+
     /// A pause that has run out is cleared.
     @Test func pastPauseClears() {
         var settings = NagiSettings()
@@ -87,4 +101,14 @@ struct SettingsTests {
         _ = SettingsStore.load(from: url, effects: effects)
         #expect(try backups() == 2)
     }
+}
+
+/// An effect that needs the screen behind it, as rain will.
+private final class GlassStub: Effect {
+    static let descriptor = EffectDescriptor(id: "test.glass", displayName: "Glass", summary: "",
+                                             layer: .glass, capabilities: [.backdrop])
+    init(context: EffectContext) throws {}
+    func update(_ frame: FrameState) {}
+    func render(_ frame: FrameState, view: DisplayView, encoder: any EffectEncoder) throws {}
+    func releaseResources() {}
 }

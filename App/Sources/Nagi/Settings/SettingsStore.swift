@@ -42,7 +42,7 @@ import Observation
         self.url = url
         // Even when fresh, a file Nagi cannot read is kept aside first.
         let loaded = Self.load(from: url, effects: effects)
-        settings = fresh ? NagiSettings() : loaded.settings
+        settings = fresh ? NagiSettings().validated(effects: effects) : loaded.settings
         mustNotWrite = !loaded.writable
     }
 
@@ -95,8 +95,9 @@ import Observation
                 }
             }
             // Debug effects always count as on.
-            engine.renderer.disabledIDs = Set(engine.renderer.effectIDs.filter { known.contains($0) && !settings.isEnabled($0) })
-            engine.hold("no effect", engine.renderer.disabledIDs.count == engine.renderer.effectIDs.count)
+            let enabled = Set(engine.renderer.effectIDs.filter { !known.contains($0) || settings.isEnabled($0, among: effects) })
+            engine.setEffects(enabled: enabled, mode: settings.effectMode == .random ? .random : .all)
+            engine.hold("no effect", enabled.isEmpty)
             switch settings.pause {
             case .none: engine.pausedUntil = nil
             case let .until(date):

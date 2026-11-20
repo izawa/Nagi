@@ -12,6 +12,8 @@ import SwiftUI
 /// Launch arguments for development and measurement (M1-PLAN 7.2):
 /// - `--self-test`: print what loaded as JSON and quit.
 /// - `--trace`: log nagi's transitions to the unified log (subsystem org.izawa.Nagi).
+/// - `--debug-lens`: also draw a few drifting lenses that magnify the captured screen (needs
+///   Screen Recording; M2-PLAN stage A).
 /// - `--debug-patch r,g,b,a,x0,y0,x1,y1`: also draw a flat premultiplied colour (pixels; the
 ///   rectangle may be omitted for the whole display).
 /// - `--sharing-readonly`: let screenshots and capture see the overlay.
@@ -51,7 +53,30 @@ import SwiftUI
     private(set) var engine: NagiEngine?
     /// The user's settings (DECISIONS D26).
     let settings = SettingsStore(effects: EffectCatalog.all, fresh: CommandLine.arguments.contains("--first-launch"))
-    private(set) lazy var notes = EffectNotes { [weak self] in self?.engine?.notes() ?? [] }
+    private(set) lazy var notes = EffectNotes { [weak self] in self?.noteLines() ?? [] }
+    private(set) lazy var screenRecording: ScreenRecording = {
+        let permission = ScreenRecording(store: settings)
+        permission.onChange = { [weak self] in
+            self?.engine?.recheckPermissions()
+            self?.notes.refresh()
+        }
+        return permission
+    }()
+    /// The settings window's tab, so the menu can open it on Permissions.
+    let settingsTab = SettingsTab()
+
+    /// The effects' notes, then a line per enabled effect that lacks its permission.
+    private func noteLines() -> [String] {
+        var lines = engine?.notes().map { String(localized: $0) } ?? []
+        // What the engine found (it reads the permission, and hears when capture is refused).
+        let unavailable = engine?.unavailableEffects ?? []
+        for descriptor in settings.descriptors where unavailable.contains(descriptor.id)
+            && settings.settings.isEnabled(descriptor.id, among: settings.effects) {
+                lines.append(String(format: String(localized: "画面収録を許可していないため、%@は出ません", bundle: .module),
+                                    String(localized: descriptor.displayName)))
+        }
+        return lines
+    }
     private var gallery: GalleryWindowController?
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -70,7 +95,8 @@ import SwiftUI
     let login = LoginItem()
 
     /// The settings window (SPEC 2.5).
-    func showSettings() {
+    func showSettings(tab: SettingsTab.Tab? = nil) {
+        if let tab { settingsTab.selection = tab }
         settingsWindow.show()
     }
 
@@ -79,7 +105,8 @@ import SwiftUI
             reason: "settings", title: { String(localized: "設定", bundle: .module) }, size: NSSize(width: 640, height: 600),
             engine: { [weak self] in self?.engine }
         ) { [unowned self] in
-            AnyView(SettingsView(store: settings, login: login, device: engine?.renderer.device))
+            AnyView(SettingsView(store: settings, login: login, screenRecording: screenRecording, tab: settingsTab,
+                                 device: engine?.renderer.device))
         }
         window.onClose = { [settings] in settings.flush() }
         return window
@@ -91,7 +118,8 @@ import SwiftUI
             reason: "onboarding", title: { String(localized: "凪", bundle: .module) }, size: NSSize(width: 480, height: 520),
             engine: { [weak self] in self?.engine }
         ) { [unowned self] in
-            AnyView(OnboardingView(store: settings, login: login) { [weak self] in self?.onboardingWindow.close() })
+            AnyView(OnboardingView(store: settings, login: login, screenRecording: screenRecording,
+                                   explainPermission: { [weak self] in self?.showSettings(tab: .permissions) }) { [weak self] in self?.onboardingWindow.close() })
         }
         window.onClose = { [settings] in
             settings.update { $0.onboarded = true }
@@ -122,6 +150,8 @@ import SwiftUI
         let patch = Self.value(after: "--debug-patch", in: arguments).map(Self.patchParameters)
         // The patch is for calibration and measurement: alone, so nothing else draws with it.
         if patch != nil { effects = [PatchEffect.self] }
+        // The lens checks the screen capture (M2-PLAN stage A), over the effects the user has on.
+        if arguments.contains("--debug-lens") { effects.append(LensEffect.self) }
         do {
             let measurement = MeasurementOptions(
                 emptyFrames: arguments.contains("--debug-empty-frame"),

@@ -3,18 +3,29 @@ import NagiCore
 import NagiKit
 import SwiftUI
 
+/// The settings window's open tab (the menu opens Permissions when an effect needs it).
+@MainActor @Observable final class SettingsTab {
+    enum Tab: Hashable { case general, effects, permissions }
+    var selection = Tab.general
+}
+
 struct SettingsView: View {
     let store: SettingsStore
     let login: LoginItem
+    let screenRecording: ScreenRecording
+    @Bindable var tab: SettingsTab
     let device: (any MTLDevice)?
 
     var body: some View {
-        TabView {
-            Tab(String(localized: "一般", bundle: .module), systemImage: "gearshape") {
+        TabView(selection: $tab.selection) {
+            Tab(String(localized: "一般", bundle: .module), systemImage: "gearshape", value: .general) {
                 GeneralSettings(store: store, login: login)
             }
-            Tab(String(localized: "エフェクト", bundle: .module), systemImage: "leaf") {
+            Tab(String(localized: "エフェクト", bundle: .module), systemImage: "sparkles", value: .effects) {
                 EffectSettings(store: store, device: device)
+            }
+            Tab(String(localized: "権限", bundle: .module), systemImage: "lock", value: SettingsTab.Tab.permissions) {
+                PermissionSettings(screenRecording: screenRecording)
             }
         }
         .frame(width: 640, height: 600)
@@ -35,6 +46,10 @@ private struct GeneralSettings: View {
                         Text(String(format: String(localized: "%lld 秒", bundle: .module), Int(store.settings.onsetSeconds)))
                             .monospacedDigit()
                     }
+                }
+                Picker(String(localized: "エフェクトの出し方", bundle: .module), selection: binding(\.effectMode)) {
+                    Text(String(localized: "オンのものを重ねる", bundle: .module)).tag(NagiSettings.EffectMode.all)
+                    Text(String(localized: "1 つを選ぶ", bundle: .module)).tag(NagiSettings.EffectMode.random)
                 }
                 Picker(String(localized: "深まる速さ", bundle: .module), selection: binding(\.deepening)) {
                     Text(String(localized: "ふつう", bundle: .module)).tag(NagiSettings.Deepening.normal)
@@ -65,6 +80,45 @@ private struct GeneralSettings: View {
 
     private func binding<T>(_ path: WritableKeyPath<NagiSettings, T>) -> Binding<T> {
         Binding(get: { store.settings[keyPath: path] }, set: { value in store.update { $0[keyPath: path] = value } })
+    }
+}
+
+/// Screen Recording (SPEC 2.5, 5): its state, how to change it, and what it costs.
+private struct PermissionSettings: View {
+    let screenRecording: ScreenRecording
+
+    var body: some View {
+        Form {
+            Section {
+                LabeledContent(String(localized: "画面収録", bundle: .module)) {
+                    switch screenRecording.state {
+                    case .granted:
+                        HStack {
+                            Text(String(localized: "許可しています", bundle: .module))
+                            Button(String(localized: "システム設定を開く", bundle: .module)) { screenRecording.openSystemSettings() }
+                        }
+                    case .unasked:
+                        Button(String(localized: "許可を求める", bundle: .module)) { screenRecording.request() }
+                    case .pending:
+                        Text(String(localized: "返事を待っています", bundle: .module))
+                    case .denied:
+                        Button(String(localized: "システム設定を開く", bundle: .module)) { screenRecording.openSystemSettings() }
+                    }
+                }
+                if screenRecording.state == .denied {
+                    Text(String(localized: "システム設定の「画面収録とシステムオーディオ録音」で凪をオンにし、凪を起動し直してください。", bundle: .module))
+                        .foregroundStyle(.secondary)
+                }
+            } footer: {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(String(localized: "雨は、後ろの画面を雨粒で屈折させるために、画面収録の許可を使います。取り込むのは凪が出ているあいだだけで、取り込んだ画面は Mac の GPU の中だけで使い、保存も送信もしません。", bundle: .module))
+                    Text(String(localized: "取り込んでいるあいだは、メニューバーに紫の印が出ます。macOS が、ときどき許可を続けるか確かめることがあります。", bundle: .module))
+                }
+                .foregroundStyle(.secondary)
+            }
+        }
+        .formStyle(.grouped)
+        .onAppear { screenRecording.refresh() }
     }
 }
 

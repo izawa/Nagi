@@ -2,14 +2,15 @@ import Foundation
 import NagiKit
 import Observation
 
-/// The effects' notes for the menu (Effect.note), e.g. that komorebi shows nothing after sunset.
+/// Lines for the menu: the effects' notes (Effect.note), e.g. that komorebi shows nothing after
+/// sunset, and that an effect cannot run without a permission.
 /// Read once a minute and after each settings change, so the menu need not ask the engine itself.
 @MainActor @Observable final class EffectNotes {
     private(set) var lines: [String] = []
-    @ObservationIgnored private let source: () -> [LocalizedStringResource]
+    @ObservationIgnored private let source: () -> [String]
     @ObservationIgnored private var timer: Timer?
 
-    init(source: @escaping () -> [LocalizedStringResource]) {
+    init(source: @escaping () -> [String]) {
         self.source = source
     }
 
@@ -24,7 +25,7 @@ import Observation
     }
 
     func refresh() {
-        let next = source().map { String(localized: $0) }
+        let next = source()
         if next != lines { lines = next }
     }
 }

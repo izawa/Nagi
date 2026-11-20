@@ -17,7 +17,7 @@ public enum EnvironmentModel {
         public var sky = Sky.natural
         /// Debug: the strongest wind the model gives (WindModel.strongest).
         public var strongestWind = false
-        /// The sum of the enabled effects' `WeatherHint.cloudBias`.
+        /// The sum of the running effects' `WeatherHint.cloudBias`.
         public var cloudBias = 0.0
         public init(sky: Sky = .natural, strongestWind: Bool = false, cloudBias: Double = 0) {
             self.sky = sky
