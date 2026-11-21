@@ -8,11 +8,14 @@ import SwiftUI
 struct MenuContent: View {
     let delegate: AppDelegate
     var store: SettingsStore { delegate.settings }
+    /// Closes the panel the way the menu-bar item expects: closing its window directly left the
+    /// item thinking the panel was open, so the next click on the icon was lost (2026-11-21).
+    @Environment(\.dismiss) private var dismiss
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             EffectToggles(store: store, screenRecording: delegate.screenRecording) {
-                Self.closePanel()
+                dismiss()
                 delegate.showSettings(tab: .permissions)
             }
             Toggle(String(localized: "1 つを選んで出す", bundle: .module), isOn: Binding(
@@ -47,17 +50,12 @@ struct MenuContent: View {
     /// A command: closes the panel, then acts.
     private func row(_ title: String, action: @escaping () -> Void) -> some View {
         Button {
-            Self.closePanel()
+            dismiss()
             action()
         } label: {
             Text(verbatim: title).frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
         }
         .buttonStyle(.borderless)
-    }
-
-    /// The panel is the key window while it is open.
-    static func closePanel() {
-        NSApp.keyWindow?.close()
     }
 
     @ViewBuilder private var pause: some View {
