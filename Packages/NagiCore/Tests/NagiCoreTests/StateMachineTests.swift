@@ -203,26 +203,27 @@ import Testing
 }
 
 
-/// A showing "see it now" started is marked until nagi is fully gone, so the engine can draw it
-/// under a clear sky; the ordinary showing that may follow, and one that started on its own, are not.
+/// "See it now" starts deepened, carries on as an ordinary calm after its 30 s while the hands
+/// rest, and its showing is marked (for the clear sky) until nagi is fully gone; the showing
+/// after that, and one that started on its own, are not.
 @Test func previewShowingIsMarkedUntilGone() {
     var machine = NagiStateMachine(timing: NagiTiming(idleOffset: 0.9))
     machine.requestPreview(at: 0)
-    #expect(machine.step(.init(now: 0.6, idleReading: 1.5)).startedByPreview)
+    let opening = machine.step(.init(now: 0.6, idleReading: 1.5))
+    #expect(opening.startedByPreview)
+    #expect(opening.depth == 120)
     #expect(machine.step(.init(now: 4.7, idleReading: 5.6)).startedByPreview)
-    let expired = machine.step(.init(now: 30.8, idleReading: 31.7))  // the 30 s ended at 30.6
-    #expect(expired.phase == .leaving)
-    #expect(expired.startedByPreview)
-    let gone = machine.step(.init(now: 31.2, idleReading: 32.1))
+    // The 30 s ended at 30.6: the hands still rest, so nagi stays.
+    let after = machine.step(.init(now: 31, idleReading: 31.9))
+    #expect(after.phase == .calm)
+    #expect(after.startedByPreview)
+    let moved = machine.step(.init(now: 40, idleReading: 0.9))
+    #expect(moved.phase == .leaving)
+    #expect(moved.startedByPreview)
+    let gone = machine.step(.init(now: 40.5, idleReading: 1.4))
     #expect(gone.phase == .active)
     #expect(!gone.startedByPreview)
-    // The hands still rest: nagi comes back on its own, as an ordinary showing.
-    var time = 32.0
-    var back = machine.step(.init(now: time, idleReading: time + 0.9))
-    while back.phase == .active, time < 400 {
-        time += 1
-        back = machine.step(.init(now: time, idleReading: time + 0.9))
-    }
+    let back = machine.step(.init(now: 43, idleReading: 3.9))
     #expect(back.phase == .entering)
     #expect(!back.startedByPreview)
 
@@ -230,4 +231,36 @@ import Testing
     let shown = ordinary.step(.init(now: 0, idleReading: 1000))
     #expect(shown.phase == .entering)
     #expect(!shown.startedByPreview)
+}
+
+/// A preview cut short leaves the stillness gathered as it was, so the next ordinary showing
+/// opens shallow; and with a long onset the preview does not outlast it as a calm.
+@Test func previewDepthAndOnsetStayThePreviews() {
+    var machine = NagiStateMachine(timing: NagiTiming(idleOffset: 0.9))
+    machine.requestPreview(at: 0)
+    #expect(machine.step(.init(now: 0.6, idleReading: 1.5)).depth == 120)
+    #expect(machine.step(.init(now: 1.6, idleReading: 0.9)).phase == .leaving)
+    _ = machine.step(.init(now: 2.1, idleReading: 1.4))
+    let next = machine.step(.init(now: 5.1, idleReading: 4.4))
+    #expect(next.phase == .entering)
+    #expect(next.depth < 5)
+
+    var patient = NagiStateMachine(timing: NagiTiming(onset: 60, idleOffset: 0.9))
+    patient.requestPreview(at: 0)
+    #expect(patient.step(.init(now: 0.6, idleReading: 1.5)).phase == .entering)
+    #expect(patient.step(.init(now: 30, idleReading: 30.9)).phase == .calm)
+    #expect(patient.step(.init(now: 31, idleReading: 31.9)).phase == .active)  // left at 30.6, faded by 31
+}
+
+/// A sample that comes late, past the preview's end and its whole fade, finds nagi already gone
+/// when it may not stay (media plays): the fade started at the end, not at the late sample.
+@Test func previewEndsOnTimeWhenSamplesAreLate() {
+    var machine = NagiStateMachine(timing: NagiTiming(idleOffset: 0.9))
+    machine.requestPreview(at: 0)
+    _ = machine.step(.init(now: 0.6, idleReading: 1.5, mediaActive: true))
+    #expect(machine.step(.init(now: 20, idleReading: 20.9, mediaActive: true)).phase == .calm)
+    let late = machine.step(.init(now: 32, idleReading: 32.9, mediaActive: true))
+    #expect(late.phase == .active)
+    #expect(!late.showsOverlay)
+    #expect(late.depth < 30.7)  // the stillness up to the end at 30.6, not to the late sample
 }

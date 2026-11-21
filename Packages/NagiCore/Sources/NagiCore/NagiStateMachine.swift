@@ -130,11 +130,18 @@ public struct NagiStateMachine: Sendable {
     private static let movingWindow = 1.0
     private static let previewStillness = 0.5
     private static let previewPatience = 10.0
+    /// "See it now" shows nagi as it is once deepened (every effect's ramps end by 120 s: rain's
+    /// coverage and moss's dew are the last), not its faint opening, which was all the preview's
+    /// 30 s used to show (DECISIONS D36).
+    private static let previewDepth = 120.0
     /// The last input as known when nagi showed (or a preview was asked for); nil while active
     /// or leaving. Any later input withdraws nagi.
     private var inputAtEntry: Double?
     /// The current (or last) showing was started by "see it now".
     private var showingIsPreview = false
+    /// Depth that showing is drawn with beyond the stillness gathered: kept apart, so a preview
+    /// cut short does not let the next ordinary showing skip its opening.
+    private var previewBoost = 0.0
 
     public init(timing: NagiTiming = NagiTiming()) {
         self.timing = timing
@@ -148,9 +155,10 @@ public struct NagiStateMachine: Sendable {
     }
 
     /// "See it now": nagi shows as soon as the hands have rested for 0.5 s (not T_onset), media
-    /// or not, and stays 30 s unless there is input. The click that asked for it, and the hand
-    /// still moving after it, do not cancel it; it gives up after 10 s of continued input.
-    /// While nagi already shows, the 30 s start again.
+    /// or not, already deepened, and stays 30 s unless there is input; after that it carries on
+    /// as an ordinary calm while the hands rest. The click that asked for it, and the hand still
+    /// moving after it, do not cancel it; it gives up after 10 s of continued input. While nagi
+    /// already shows, the 30 s start again.
     public mutating func requestPreview(at now: Double) {
         advance(to: now)
         guard previousInputs?.blocksOverlay != true, timing.previewDuration > 0 else { return }
@@ -198,6 +206,7 @@ public struct NagiStateMachine: Sendable {
                 if previewRequestedAt != nil, idle >= Self.previewStillness {
                     previewRequestedAt = nil
                     previewEndsAt = now + timing.previewDuration
+                    previewBoost = max(Self.previewDepth - depth, 0)
                     enter(at: now, preview: true)
                 } else if idle >= timing.onset && !mediaSuppresses {
                     enter(at: now, preview: false)
@@ -220,7 +229,8 @@ public struct NagiStateMachine: Sendable {
             leaveDeadline = nil
         }
         return NagiOutput(
-            phase: phase, presence: presence(at: now), depth: depth,
+            phase: phase, presence: presence(at: now),
+            depth: depth + (showingIsPreview && phase != .active ? previewBoost : 0),
             nextWake: nextWake, leaveDeadline: leaveDeadline,
             startedByPreview: showingIsPreview && phase != .active
         )
@@ -290,6 +300,17 @@ public struct NagiStateMachine: Sendable {
         }
     }
 
+    /// At the preview's end nagi stays while the hands still rest, as an ordinary calm would
+    /// be there: the onset has passed and no media holds it back (leaving and coming back a
+    /// second later looked like a fault, DECISIONS D36). Judged at the end itself from the last
+    /// reading, so a late sample changes nothing; input after it withdraws nagi as usual.
+    private func mayStayAfterPreview(at expiry: Double) -> Bool {
+        guard let last = previousInputs else { return false }
+        let idle = trueIdle(last.idleReading) + (expiry - last.now)
+        let media = last.mediaActive || lastMediaActiveAt.map { expiry < $0 + timing.mediaGrace } ?? false
+        return idle >= timing.onset && !(last.suppressDuringMedia && media)
+    }
+
     private mutating func advance(to now: Double) {
         let previousTime = updatedAt ?? now
         updatedAt = now
@@ -298,16 +319,19 @@ public struct NagiStateMachine: Sendable {
         switch state {
         case .entering, .calm:
             if let expiry = previewEndsAt, now >= expiry {
-                depth += (expiry - previousTime) * timing.depthGrowthRate
-                leave(at: expiry)
-                decayFrom = expiry
-            } else {
-                depth += (now - previousTime) * timing.depthGrowthRate
-                if case let .entering(startedAt) = state, now >= startedAt + timing.entryDuration {
-                    state = .calm
+                previewEndsAt = nil
+                if !mayStayAfterPreview(at: expiry) {
+                    depth += (expiry - previousTime) * timing.depthGrowthRate
+                    leave(at: expiry)
+                    decayFrom = expiry
+                    break
                 }
-                return
             }
+            depth += (now - previousTime) * timing.depthGrowthRate
+            if case let .entering(startedAt) = state, now >= startedAt + timing.entryDuration {
+                state = .calm
+            }
+            return
         case .active, .leaving:
             break
         }
