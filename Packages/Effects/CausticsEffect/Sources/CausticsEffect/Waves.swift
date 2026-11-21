@@ -70,23 +70,22 @@ enum WaveField {
         min(max((120 - wave.wavelength) / 80, 0), 1)
     }
 
-    /// The waves as nagi deepens (M4-PLAN 4): at first only the long swell, its soft arcs; from
-    /// 20 to 40 seconds the middle waves close the net; from 30 to 50 the short ripples join.
+    /// The waves as nagi deepens (M4-PLAN 4): the long and middle waves are there from the
+    /// opening, a soft net; from 30 to 50 seconds the short ripples join and sharpen it. The
+    /// middle waves came in at 20–40 s at first, but with the swell alone the net was too faint
+    /// to see for the first half minute (2026-11-21, author).
     static func deepened(_ waves: [Wave], depth: Double) -> [Wave] {
-        func smooth(_ a: Double, _ b: Double, _ x: Double) -> Double {
-            let t = min(max((x - a) / (b - a), 0), 1)
-            return t * t * (3 - 2 * t)
-        }
-        let middle = smooth(20, 40, depth), short = smooth(30, 50, depth)
+        let t = min(max((depth - 30) / 20, 0), 1)
+        let short = t * t * (3 - 2 * t)
         // The longest wave is the swell whatever its length, so the opening always moves.
         let swell = waves.indices.max { waves[$0].wavelength < waves[$1].wavelength }
         return waves.indices.map { index in
-            let wave = waves[index]
-            var grown = wave
-            guard index != swell else { return grown }
-            let s = shortness(wave)
-            // Long waves stay; the shorter the wave, the later it comes.
-            grown.amplitude *= s < 0.5 ? 1 - (1 - middle) * (s / 0.5) : middle * (1 - (s - 0.5) / 0.5) + short * ((s - 0.5) / 0.5)
+            var grown = waves[index]
+            let s = shortness(grown)
+            guard index != swell, s > 0.5 else { return grown }
+            // The shorter the wave, the less of it before the ripples join.
+            let rippleShare = (s - 0.5) / 0.5
+            grown.amplitude *= 1 - rippleShare + short * rippleShare
             return grown
         }
     }

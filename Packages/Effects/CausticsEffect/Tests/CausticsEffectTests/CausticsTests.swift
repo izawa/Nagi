@@ -154,15 +154,18 @@ import Testing
         let shallow = WaveField.deepened(waves, depth: 0), deep = WaveField.deepened(waves, depth: 60)
         for (a, (b, c)) in zip(waves, zip(shallow, deep)) {
             #expect(abs(c.amplitude - a.amplitude) < 1e-12)
-            if WaveField.shortness(a) > 0.3 { #expect(b.amplitude < a.amplitude) }
-            if WaveField.shortness(a) == 0 { #expect(abs(b.amplitude - a.amplitude) < 1e-12) }
+            // The long and middle waves are there from the opening; the short ones come later.
+            if WaveField.shortness(a) > 0.5 { #expect(b.amplitude < a.amplitude) }
+            if WaveField.shortness(a) <= 0.5 { #expect(abs(b.amplitude - a.amplitude) < 1e-12) }
         }
     }
 
     /// Even when every wave is short (3 waves, seed 5), the longest stays as the opening's swell.
     @Test func theOpeningAlwaysHasASwell() {
         let waves = WaveField.waves(count: 3, slope: 0.07, seed: 5)
-        #expect(WaveField.rmsSlope(WaveField.deepened(waves, depth: 0)) > 0.02)
+        #expect(waves.allSatisfy { WaveField.shortness($0) > 0.5 })
+        let longest = waves.indices.max { waves[$0].wavelength < waves[$1].wavelength }!
+        #expect(WaveField.deepened(waves, depth: 0)[longest].amplitude == waves[longest].amplitude)
     }
 
     /// The light bends further at a low sun: the surface patch drawn must reach further out.

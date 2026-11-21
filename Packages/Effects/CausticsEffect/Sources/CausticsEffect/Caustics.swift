@@ -314,11 +314,11 @@ public final class Caustics: Effect {
             splat.drawPrimitives(type: .triangleStrip, vertexStart: 0, vertexCount: 4, instanceCount: columns * rows)
         }
 
-        // Clouds and entry/exit melt the net towards flat water (D20, D23); a low sun or the moon
-        // weakens it the same way.
-        let cloud = min(max(frame.environment.sunOcclusion, 0), 1)
-        let entering = frame.phase == .calm ? 1 : min(max(frame.presence, 0), 1)
-        let contrast = (1 - cloud) * entering
+        // Clouds melt the net towards flat water (D20). Entry and exit do not, unlike komorebi's
+        // (D23): the net comes and goes with presence alone. Water has no uniform shade to show
+        // first, and with presence² it stayed invisible for two seconds after "see it now"; an
+        // exit-only melt would make the net jump when input cuts an entry short (2026-11-21).
+        let contrast = 1 - min(max(frame.environment.sunOcclusion, 0), 1)
         // A low sun or a setting moon fades the whole overlay, so its last frame is clear.
         let shown = peak * light.weight
         let colour: SIMD3<Float> = switch (dark, light.isMoon) {
