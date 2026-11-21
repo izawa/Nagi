@@ -36,7 +36,8 @@ enum WaveField {
             let angle = heading + fan * 2.4 + (random.next() - 0.5) * 0.3
             // Log-uniform wavelengths, shuffled against the angles.
             let wavelength = 40 * pow(6, random.next())
-            let period = 6 * (wavelength / 80).squareRoot() * (0.85 + 0.3 * random.next())
+            // 8 s for an 8 cm wave: the author found 6 s a little quick at stop W2 (75 % of it).
+            let period = 8 * (wavelength / 80).squareRoot() * (0.85 + 0.3 * random.next())
             waves.append(Wave(direction: SIMD2(cos(angle), sin(angle)), number: 2 * .pi / wavelength,
                               amplitude: 1, angularFrequency: 2 * .pi / period, phase: random.next() * 2 * .pi))
         }
@@ -59,6 +60,33 @@ enum WaveField {
             var grown = wave
             let downwind = max((wave.direction * heading).sum(), 0)
             grown.amplitude *= 0.8 + 0.5 * push * downwind
+            return grown
+        }
+    }
+
+    /// How much a wave answers gusts and deepening, 0 for the long swell … 1 for the shortest
+    /// ripples (wavelengths 12 cm and down to 4 cm).
+    static func shortness(_ wave: Wave) -> Double {
+        min(max((120 - wave.wavelength) / 80, 0), 1)
+    }
+
+    /// The waves as nagi deepens (M4-PLAN 4): at first only the long swell, its soft arcs; from
+    /// 20 to 40 seconds the middle waves close the net; from 30 to 50 the short ripples join.
+    static func deepened(_ waves: [Wave], depth: Double) -> [Wave] {
+        func smooth(_ a: Double, _ b: Double, _ x: Double) -> Double {
+            let t = min(max((x - a) / (b - a), 0), 1)
+            return t * t * (3 - 2 * t)
+        }
+        let middle = smooth(20, 40, depth), short = smooth(30, 50, depth)
+        // The longest wave is the swell whatever its length, so the opening always moves.
+        let swell = waves.indices.max { waves[$0].wavelength < waves[$1].wavelength }
+        return waves.indices.map { index in
+            let wave = waves[index]
+            var grown = wave
+            guard index != swell else { return grown }
+            let s = shortness(wave)
+            // Long waves stay; the shorter the wave, the later it comes.
+            grown.amplitude *= s < 0.5 ? 1 - (1 - middle) * (s / 0.5) : middle * (1 - (s - 0.5) / 0.5) + short * ((s - 0.5) / 0.5)
             return grown
         }
     }

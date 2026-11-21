@@ -38,8 +38,10 @@ public final class Caustics: Effect {
     static let waveCapacity = 16
     /// The illuminance texture is this many times coarser than the display (M4-PLAN 5).
     static let reduction = 4
-    /// Millimetres between the surface points that carry light.
-    static let spacing = 1.0
+    /// Millimetres between the surface points that carry light. The lines' width comes from the
+    /// sun's image and the texture; at 1.4 mm instead of 1 the picture differs by at most 14/255
+    /// and the GPU time falls from about 1.6 to 1.0 ms at 5K (M4-LOG stage B).
+    static let spacing = 1.4
     /// Most surface points a display may use (a 1.5 m × 1 m display at 1 mm).
     static let pointCapacity = 1_500_000
     /// The sun's angular diameter, radians (komorebi's too).
@@ -65,7 +67,18 @@ public final class Caustics: Effect {
                     SIMD4<Float>, SIMD4<Float>, SIMD4<Float>, SIMD4<Float>, SIMD4<Float>, SIMD4<Float>, SIMD4<Float>, SIMD4<Float>)
         /// The waves' phases, four to an element.
         var phases: (SIMD4<Float>, SIMD4<Float>, SIMD4<Float>, SIMD4<Float>)
+        /// How much each wave answers a gust (its shortness × the gust gain), four to an element.
+        var gustGains: (SIMD4<Float>, SIMD4<Float>, SIMD4<Float>, SIMD4<Float>)
+        /// The gust fronts' direction (unit), their speed (mm/s), how many gusts follow.
+        var front: SIMD4<Float>
+        /// Per gust: onset − now (s), rise (s), duration (s), strength (Wind.Gust).
+        var gusts: (SIMD4<Float>, SIMD4<Float>, SIMD4<Float>, SIMD4<Float>, SIMD4<Float>, SIMD4<Float>, SIMD4<Float>, SIMD4<Float>)
     }
+
+    static let maxGusts = 8
+    /// How much a full gust raises the shortest ripples (they triple); the long swell barely moves.
+    /// At 1 (doubling) the author could not see a gust cross at stop W2.
+    static let gustGain = 2.0
 
     struct CompositeUniforms {
         /// Peak alpha × strength, 1 for dark appearance, exposure, contrast (0 flat … 1 full).
@@ -157,6 +170,24 @@ public final class Caustics: Effect {
         return -SIMD3(cos(altitude) * sin(position.azimuth), -cos(altitude) * cos(position.azimuth), sin(altitude))
     }
 
+    /// How far (mm) a surface tilted by `slope` towards or away from the light, or across it, can
+    /// move where the light lands, compared with flat water `depth` mm deep.
+    static func deflection(incident: SIMD3<Double>, slope: Double, depth: Double) -> Double {
+        func landing(_ normal: SIMD3<Double>) -> SIMD2<Double> {
+            let ray = refract(incident, normal: normal, eta: 1 / refractiveIndex)
+            return SIMD2(ray.x, ray.y) / max(-ray.z, 0.05) * depth
+        }
+        let flat = landing(SIMD3(0, 0, 1))
+        let horizontal = SIMD2(incident.x, incident.y)
+        let along = (horizontal * horizontal).sum() > 1e-12 ? horizontal / (horizontal * horizontal).sum().squareRoot() : SIMD2(1, 0)
+        let across = SIMD2(-along.y, along.x)
+        return [along, -along, across].map { tilt in
+            let normal = SIMD3(-slope * tilt.x, -slope * tilt.y, 1)
+            let delta = landing(normal / (normal * normal).sum().squareRoot()) - flat
+            return (delta * delta).sum().squareRoot()
+        }.max() ?? 0
+    }
+
     /// The direction it travels in the water under a flat surface.
     static func refractedDirection(_ position: CelestialPosition) -> SIMD3<Double> {
         refract(incidentDirection(position), normal: SIMD3(0, 0, 1), eta: 1 / refractiveIndex)
@@ -194,8 +225,9 @@ public final class Caustics: Effect {
         let depth = Self.bounded(frame.number("waterDepth", default: 28), 10...60) * 10   // mm
         let count = Int(Self.bounded(frame.number("waves", default: 12), 3...16).rounded())
         let slope = Self.bounded(frame.number("slope", default: 0.07), 0...0.2)
-        let waves = WaveField.windy(WaveField.waves(count: count, slope: slope, seed: frame.seed),
-                                    wind: frame.environment.wind.velocity)
+        let waves = WaveField.deepened(WaveField.windy(WaveField.waves(count: count, slope: slope, seed: frame.seed),
+                                                       wind: frame.environment.wind.velocity),
+                                       depth: frame.depth.isFinite ? frame.depth : 0)
         let phases = WaveField.phases(waves, time: frame.environment.wind.time)
         let direction = Self.refractedDirection(light.position)
         let sun = Self.sunCovariance(direction: direction, incident: Self.incidentDirection(light.position), depth: depth)
@@ -206,7 +238,10 @@ public final class Caustics: Effect {
         let floorOrigin = SIMD2(view.frameInDesktop.minX, view.frameInDesktop.minY) * Self.desktopMillimetresPerPoint
         let floorSize = SIMD2(view.frameInDesktop.width, view.frameInDesktop.height) * millimetresPerPoint
         let shift = SIMD2(direction.x, direction.y) / max(-direction.z, 0.05) * depth
-        let margin = depth * slope * 3 + 10
+        // As far as the steepest likely surface (three times the mean slope, a full gust on top)
+        // can bend the light at this sun, plus a little for the splats' own width.
+        let steepest = slope * 3 * 1.3 * (1 + Self.gustGain)
+        let margin = Self.deflection(incident: Self.incidentDirection(light.position), slope: steepest, depth: depth) + 6
         // The surface points sit on one grid fixed to the water, whatever the display: moving a
         // display moves which points are drawn, not where they are.
         let regionOrigin = ((floorOrigin - shift - SIMD2(margin, margin)) / Self.spacing).rounded(.down) * Self.spacing
@@ -223,11 +258,23 @@ public final class Caustics: Effect {
 
         var packed = [SIMD4<Float>](repeating: .zero, count: Self.waveCapacity)
         var packedPhases = [Float](repeating: 0, count: Self.waveCapacity)
+        var packedGains = [Float](repeating: 0, count: Self.waveCapacity)
+        // Gusts join as nagi deepens, with the short ripples (30–50 s, M4-PLAN 4); under Reduce
+        // Motion they stir the water half as much (the wind's clock is slowed too).
+        let gustGain = Self.gustGain * Self.smooth(30, 50, frame.depth.isFinite ? frame.depth : 0)
+            * (frame.accessibility.reduceMotion ? 0.5 : 1)
         for (index, wave) in waves.prefix(Self.waveCapacity).enumerated() {
             packed[index] = SIMD4(Float(wave.direction.x), Float(wave.direction.y), Float(wave.number), Float(wave.amplitude))
             packedPhases[index] = Float(phases[index])
+            packedGains[index] = Float(gustGain * (0.2 + 0.8 * WaveField.shortness(wave)))
         }
-        func phase(_ i: Int) -> SIMD4<Float> { SIMD4(packedPhases[i], packedPhases[i + 1], packedPhases[i + 2], packedPhases[i + 3]) }
+        func four(_ values: [Float], _ i: Int) -> SIMD4<Float> { SIMD4(values[i], values[i + 1], values[i + 2], values[i + 3]) }
+        func phase(_ i: Int) -> SIMD4<Float> { four(packedPhases, i) }
+        let wind = frame.environment.wind
+        var gustSlots = [SIMD4<Float>](repeating: .zero, count: Self.maxGusts)
+        for (index, gust) in wind.gusts.prefix(Self.maxGusts).enumerated() {
+            gustSlots[index] = SIMD4(Float(gust.onset - wind.time), Float(gust.rise), Float(gust.duration), Float(gust.strength))
+        }
         var uniforms = SplatUniforms(
             grid: SIMD4(Float(regionOrigin.x), Float(regionOrigin.y), Float(Self.spacing), Float(columns)),
             target: SIMD4(Float(floorOrigin.x), Float(floorOrigin.y), Float(texel), Float(waves.count)),
@@ -236,7 +283,11 @@ public final class Caustics: Effect {
             sun: SIMD4(Float(sun.xx), Float(sun.xy), Float(sun.yy), Float(max(texel * texel * 0.36, Self.spacing * Self.spacing * 0.36))),
             waves: (packed[0], packed[1], packed[2], packed[3], packed[4], packed[5], packed[6], packed[7],
                     packed[8], packed[9], packed[10], packed[11], packed[12], packed[13], packed[14], packed[15]),
-            phases: (phase(0), phase(4), phase(8), phase(12)))
+            phases: (phase(0), phase(4), phase(8), phase(12)),
+            gustGains: (four(packedGains, 0), four(packedGains, 4), four(packedGains, 8), four(packedGains, 12)),
+            front: SIMD4(Float(wind.frontDirection.x), Float(wind.frontDirection.y), Float(Wind.frontSpeed),
+                         Float(min(wind.gusts.count, Self.maxGusts))),
+            gusts: (gustSlots[0], gustSlots[1], gustSlots[2], gustSlots[3], gustSlots[4], gustSlots[5], gustSlots[6], gustSlots[7]))
 
         var points = SIMD2<UInt32>(UInt32(columns + 1), UInt32(rows + 1))
         let landing = try landingBuffer(display: view.id, count: (columns + 1) * (rows + 1))

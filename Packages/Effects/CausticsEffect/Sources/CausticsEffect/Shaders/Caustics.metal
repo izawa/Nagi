@@ -12,6 +12,9 @@ struct SplatUniforms {
     float4 sun;       // the sun's image covariance on the floor (mm²): xx, xy, yy; least variance
     float4 waves[16]; // direction x, y, wavenumber (rad/mm), amplitude (mm)
     float4 phases[4]; // four to an element
+    float4 gustGains[4]; // how much each wave answers a gust, four to an element
+    float4 front;     // gust fronts' direction (unit), their speed (mm/s), how many gusts
+    float4 gusts[8];  // onset − now (s), rise (s), duration (s), strength
 };
 
 struct Splat {
@@ -23,16 +26,34 @@ struct Splat {
 
 static float phaseOf(constant SplatUniforms &u, int i) { return u.phases[i / 4][i % 4]; }
 
+// Gust strength 0…1 at a point on the water (mm): the front reaches points downwind later. The
+// same curve as Wind.Gust.envelope in NagiKit (and komorebi's).
+static float gustAt(float2 p, constant SplatUniforms &u) {
+    float delay = dot(p, u.front.xy) / u.front.z;
+    float strongest = 0;
+    for (int i = 0; i < int(u.front.w); i++) {
+        float4 g = u.gusts[i];
+        float s = -g.x - delay;
+        if (s <= 0 || s >= g.z) continue;
+        strongest = max(strongest, g.w * smoothstep(0.0, g.y, s) * (1.0 - smoothstep(g.y, g.z, s)));
+    }
+    return strongest;
+}
+
 // Where light through the surface point p (mm) lands on the floor (mm).
 static float2 landing(float2 p, constant SplatUniforms &u) {
     float height = 0;
     float2 gradient = 0;
     int count = int(u.target.w);
+    // Where a gust front has arrived, the short ripples rise: the arcs crowd closer from the
+    // windward side first, without a bright band running across.
+    float gust = gustAt(p, u);
     for (int i = 0; i < count; i++) {
         float4 w = u.waves[i];
+        float amplitude = w.w * (1 + gust * u.gustGains[i / 4][i % 4]);
         float theta = w.z * dot(w.xy, p) + phaseOf(u, i);
-        height += w.w * sin(theta);
-        gradient += w.w * w.z * cos(theta) * w.xy;
+        height += amplitude * sin(theta);
+        gradient += amplitude * w.z * cos(theta) * w.xy;
     }
     float3 normal = normalize(float3(-gradient, 1));
     float3 ray = refract(u.light.xyz, normal, 1.0 / 1.333);

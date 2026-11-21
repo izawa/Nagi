@@ -128,5 +128,31 @@ import Testing
         let calm = WaveField.windy(waves, wind: .zero), breezy = WaveField.windy(waves, wind: SIMD2(4, 0))
         #expect(WaveField.rmsSlope(breezy) > WaveField.rmsSlope(calm))
     }
+
+    /// At first only the long swell; the shorter waves come as nagi deepens.
+    @Test func shortWavesComeWithDepth() {
+        let waves = WaveField.waves(count: 12, slope: 0.07, seed: 4)
+        let shallow = WaveField.deepened(waves, depth: 0), deep = WaveField.deepened(waves, depth: 60)
+        for (a, (b, c)) in zip(waves, zip(shallow, deep)) {
+            #expect(abs(c.amplitude - a.amplitude) < 1e-12)
+            if WaveField.shortness(a) > 0.3 { #expect(b.amplitude < a.amplitude) }
+            if WaveField.shortness(a) == 0 { #expect(abs(b.amplitude - a.amplitude) < 1e-12) }
+        }
+    }
+
+    /// Even when every wave is short (3 waves, seed 5), the longest stays as the opening's swell.
+    @Test func theOpeningAlwaysHasASwell() {
+        let waves = WaveField.waves(count: 3, slope: 0.07, seed: 5)
+        #expect(WaveField.rmsSlope(WaveField.deepened(waves, depth: 0)) > 0.02)
+    }
+
+    /// The light bends further at a low sun: the surface patch drawn must reach further out.
+    @Test func lowSunBendsFurther() {
+        let noon = Caustics.incidentDirection(CelestialPosition(altitude: 60 * .pi / 180, azimuth: .pi))
+        let evening = Caustics.incidentDirection(CelestialPosition(altitude: 8 * .pi / 180, azimuth: 1.5 * .pi))
+        #expect(Caustics.deflection(incident: evening, slope: 0.3, depth: 280)
+                > Caustics.deflection(incident: noon, slope: 0.3, depth: 280))
+        #expect(Caustics.deflection(incident: noon, slope: 0, depth: 280) < 1e-9)
+    }
 }
 
