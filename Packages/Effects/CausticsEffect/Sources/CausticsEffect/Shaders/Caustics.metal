@@ -40,7 +40,8 @@ static float gustAt(float2 p, constant SplatUniforms &u) {
     return strongest;
 }
 
-// Where light through the surface point p (mm) lands on the floor (mm).
+// Where light through the surface point p (mm) lands on the floor (mm); NaN where the surface
+// there faces away from the light (a low sun and a steep ripple): no light enters it.
 static float2 landing(float2 p, constant SplatUniforms &u) {
     float height = 0;
     float2 gradient = 0;
@@ -56,6 +57,7 @@ static float2 landing(float2 p, constant SplatUniforms &u) {
         gradient += amplitude * w.z * cos(theta) * w.xy;
     }
     float3 normal = normalize(float3(-gradient, 1));
+    if (dot(normal, u.light.xyz) >= 0) return float2(NAN);
     float3 ray = refract(u.light.xyz, normal, 1.0 / 1.333);
     float t = (u.light.w + height) / max(-ray.z, 0.05);
     return p + ray.xy * t;
@@ -79,6 +81,16 @@ vertex Splat splatVertex(uint vid [[vertex_id]], uint iid [[instance_id]],
     float2 q = landings[index];
     // How the patch of surface this point stands for is stretched on the floor.
     float2 qx = landings[index + 1], qy = landings[index + stride];
+    Splat out;
+    if (any(isnan(q))) {
+        // A facet turned from the light: nothing to draw (all four corners at one point).
+        out.position = float4(2, 2, 0, 1);
+        out.centre = 0; out.inverse = 0; out.weight = 0;
+        return out;
+    }
+    // A neighbour turned from the light says nothing of this point's spread: take flat water's.
+    if (any(isnan(qx))) qx = q + float2(spacing, 0);
+    if (any(isnan(qy))) qy = q + float2(0, spacing);
     float2x2 j = float2x2((qx - q) / spacing, (qy - q) / spacing);
     float cell = spacing * spacing / 12;   // a uniform square's variance
     float2x2 c = j * float2x2(cell, 0, 0, cell) * transpose(j);
@@ -86,7 +98,6 @@ vertex Splat splatVertex(uint vid [[vertex_id]], uint iid [[instance_id]],
     float texel = u.target.z;
     xx /= texel * texel; xy /= texel * texel; yy /= texel * texel;
     float det = max(xx * yy - xy * xy, 1e-6);
-    Splat out;
     out.centre = (q - u.target.xy) / texel;
     out.inverse = float3(yy, -xy, xx) / det;
     out.weight = (spacing / texel) * (spacing / texel) / (2 * M_PI_F * sqrt(det));
@@ -105,7 +116,7 @@ fragment float splatFragment(Splat in [[stage_in]]) {
 }
 
 struct CompositeUniforms {
-    float4 output;   // peak alpha, dark (1) or light (0), exposure, contrast
+    float4 output;   // peak alpha, dark (1) or light (0), exposure, how far a cloud hides the sun
     float4 colour;
 };
 
@@ -119,20 +130,43 @@ vertex Out compositeVertex(uint vid [[vertex_id]]) {
     return out;
 }
 
-fragment float4 compositeFragment(Out in [[stage_in]], texture2d<float> illuminance [[texture(0)]],
-                                  sampler s [[sampler(0)]], constant CompositeUniforms &u [[buffer(0)]]) {
-    float lit = illuminance.sample(s, in.uv).r;
-    // Clouds, a low sun and entry/exit melt the net towards flat water (1).
-    float e = mix(1.0, lit, u.output.w);
+// The overlay's alpha under the clear sun for illuminance `lit` (flat water gives 1).
+static float clearAlpha(float lit, constant CompositeUniforms &u) {
     float k = u.output.z;
-    float alpha;
-    if (u.output.y > 0.5) {
-        // Dark: light where it gathers, above what flat water gives.
-        alpha = u.output.x * (1 - exp(-k * max(e - 1, 0.0)));
-    } else {
-        // Light: shade where little light falls; the bright lines leave the page as it is.
-        alpha = u.output.x * exp(-k * e) / exp(-k * 0.0);
+    // Dark: light where it gathers, above what flat water gives. Light: shade where little
+    // light falls; the bright lines leave the page as it is.
+    return u.output.y > 0.5 ? u.output.x * (1 - exp(-k * max(lit - 1, 0.0))) : u.output.x * exp(-k * lit);
+}
+
+// The display's mean clear alpha, on a 128 × 72 grid of samples: what the water melts to when a
+// cloud hides the sun (komorebi's rule, DECISIONS D20). One threadgroup of 256 threads.
+constant uint meanGrid = 128, meanRows = 72, meanThreads = 256;
+
+kernel void causticsMean(texture2d<float> illuminance [[texture(0)]], sampler s [[sampler(0)]],
+                         constant CompositeUniforms &u [[buffer(0)]], device float &mean [[buffer(1)]],
+                         uint lane [[thread_index_in_threadgroup]]) {
+    threadgroup float sums[meanThreads];
+    float sum = 0;
+    for (uint k = lane; k < meanGrid * meanRows; k += meanThreads) {
+        float2 uv = (float2(k % meanGrid, k / meanGrid) + 0.5) / float2(meanGrid, meanRows);
+        sum += clearAlpha(illuminance.sample(s, uv, level(0)).r, u);
     }
-    if (alpha <= 0.0005) discard_fragment();
+    sums[lane] = sum;
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+    for (uint stride = meanThreads / 2; stride > 0; stride /= 2) {
+        if (lane < stride) sums[lane] += sums[lane + stride];
+        threadgroup_barrier(mem_flags::mem_threadgroup);
+    }
+    if (lane == 0) mean = sums[0] / float(meanGrid * meanRows);
+}
+
+// Under a cloud the direct sun goes and only the sky's light comes through the water: the net
+// melts towards the display's mean, so the page keeps its overall tone (D20).
+fragment float4 compositeFragment(Out in [[stage_in]], texture2d<float> illuminance [[texture(0)]],
+                                  sampler s [[sampler(0)]], constant CompositeUniforms &u [[buffer(0)]],
+                                  constant float &mean [[buffer(1)]]) {
+    float hidden = u.output.w;
+    float alpha = hidden >= 1 ? mean : clearAlpha(illuminance.sample(s, in.uv).r, u);
+    if (hidden > 0 && hidden < 1) alpha = mix(alpha, mean, hidden);
     return float4(u.colour.rgb * alpha, alpha);
 }

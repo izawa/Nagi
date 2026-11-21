@@ -32,6 +32,8 @@ public final class Caustics: Effect {
             ParameterSpec(key: "exposure", label: "露出", kind: .slider(range: 0.3...4, defaultValue: 1.2)),
             ParameterSpec(key: "lightAlpha", label: "影の濃さ", kind: .slider(range: 0...0.3, defaultValue: 0.12)),
             ParameterSpec(key: "darkAlpha", label: "光の強さ", kind: .slider(range: 0...0.3, defaultValue: 0.14)),
+            // Komorebi's moonlight strength (D27), in both appearances, until stop W3.
+            ParameterSpec(key: "moonAlpha", label: "月明かりの強さ", kind: .slider(range: 0...0.3, defaultValue: 0.15)),
         ])
 
     /// Most waves the shader sums.
@@ -81,7 +83,7 @@ public final class Caustics: Effect {
     static let gustGain = 2.0
 
     struct CompositeUniforms {
-        /// Peak alpha × strength, 1 for dark appearance, exposure, contrast (0 flat … 1 full).
+        /// Peak alpha × strength, 1 for dark appearance, exposure, how far a cloud hides the sun.
         var output: SIMD4<Float>
         /// The colour drawn (premultiplied by alpha in the shader).
         var colour: SIMD4<Float>
@@ -91,6 +93,9 @@ public final class Caustics: Effect {
     private let splatPipeline: any MTLRenderPipelineState
     private let compositePipeline: any MTLRenderPipelineState
     private let landingPipeline: any MTLComputePipelineState
+    private let meanPipeline: any MTLComputePipelineState
+    /// Each display's mean clear alpha (one float), written by `causticsMean` on the GPU.
+    private var means: [UInt32: any MTLBuffer] = [:]
     private var landings: [UInt32: any MTLBuffer] = [:]
     private let sampler: any MTLSamplerState
     private var illuminance: [UInt32: any MTLTexture] = [:]
@@ -118,6 +123,8 @@ public final class Caustics: Effect {
         compositePipeline = try context.device.makeRenderPipelineState(descriptor: composite)
         guard let landing = library.makeFunction(name: "landingKernel") else { throw CausticsError("no landing kernel") }
         landingPipeline = try context.device.makeComputePipelineState(function: landing)
+        guard let mean = library.makeFunction(name: "causticsMean") else { throw CausticsError("no mean kernel") }
+        meanPipeline = try context.device.makeComputePipelineState(function: mean)
         let samplerDescriptor = MTLSamplerDescriptor()
         samplerDescriptor.minFilter = .linear
         samplerDescriptor.magFilter = .linear
@@ -134,6 +141,7 @@ public final class Caustics: Effect {
     public func releaseResources() {
         illuminance.removeAll()
         landings.removeAll()
+        means.removeAll()
     }
 
     /// The last illuminance drawn for a display (tests).
@@ -156,11 +164,18 @@ public final class Caustics: Effect {
     public static func note(_ frame: FrameState) -> LocalizedStringResource? {
         switch lightSource(frame) {
         case let light? where !light.isMoon: nil
-        case let light? where light.weight * frame.number("lightAlpha", default: 0.12) >= 0.02:
+        case let light? where light.weight * peak(frame, isMoon: true) >= 0.02:
             localized("日が沈んでいます。水中の光は月明かりで薄く現れます")
         default: frame.environment.sun.altitude > 0
             ? localized("日が低いので、水中の光は現れません") : localized("日が沈んでいるので、水中の光は現れません")
         }
+    }
+
+    /// The overlay's strongest alpha: the moon has its own, the sun one per appearance.
+    static func peak(_ frame: FrameState, isMoon: Bool) -> Double {
+        if isMoon { return bounded(frame.number("moonAlpha", default: 0.15), 0...0.3) }
+        return frame.appearance == .dark ? bounded(frame.number("darkAlpha", default: 0.14), 0...0.3)
+            : bounded(frame.number("lightAlpha", default: 0.12), 0...0.3)
     }
 
     /// The direction light travels in the air towards the water (x east, y south, z up), from a
@@ -170,22 +185,32 @@ public final class Caustics: Effect {
         return -SIMD3(cos(altitude) * sin(position.azimuth), -cos(altitude) * cos(position.azimuth), sin(altitude))
     }
 
-    /// How far (mm) a surface tilted by `slope` towards or away from the light, or across it, can
-    /// move where the light lands, compared with flat water `depth` mm deep.
-    static func deflection(incident: SIMD3<Double>, slope: Double, depth: Double) -> Double {
+    /// How far (mm), along x and y, a surface tilted by up to `slope` in any direction can move
+    /// where the light lands, compared with flat water `depth` mm deep: the least and the most.
+    /// One-sided at a low sun: a tilt towards it bends the light far, away from it little.
+    /// Tilts that turn the surface from the light let none through and are left out.
+    static func deflection(incident: SIMD3<Double>, slope: Double, depth: Double) -> (low: SIMD2<Double>, high: SIMD2<Double>) {
         func landing(_ normal: SIMD3<Double>) -> SIMD2<Double> {
             let ray = refract(incident, normal: normal, eta: 1 / refractiveIndex)
             return SIMD2(ray.x, ray.y) / max(-ray.z, 0.05) * depth
         }
         let flat = landing(SIMD3(0, 0, 1))
-        let horizontal = SIMD2(incident.x, incident.y)
-        let along = (horizontal * horizontal).sum() > 1e-12 ? horizontal / (horizontal * horizontal).sum().squareRoot() : SIMD2(1, 0)
-        let across = SIMD2(-along.y, along.x)
-        return [along, -along, across].map { tilt in
-            let normal = SIMD3(-slope * tilt.x, -slope * tilt.y, 1)
-            let delta = landing(normal / (normal * normal).sum().squareRoot()) - flat
-            return (delta * delta).sum().squareRoot()
-        }.max() ?? 0
+        var low = SIMD2<Double>(0, 0), high = SIMD2<Double>(0, 0)
+        // Every direction, and slopes short of the steepest too: near grazing a gentler slope can
+        // bend further than a steep one that turns the surface from the light.
+        for step in 0..<32 {
+            let angle = Double(step) * .pi / 16
+            for fraction in stride(from: 0.01, through: 1.0, by: 0.01) {
+                let tilted = SIMD3(-slope * fraction * cos(angle), -slope * fraction * sin(angle), 1)
+                let normal = tilted / (tilted * tilted).sum().squareRoot()
+                guard (normal * incident).sum() < 0 else { continue }
+                let delta = landing(normal) - flat
+                low = pointwiseMin(low, delta)
+                high = pointwiseMax(high, delta)
+            }
+        }
+        // Between samples, close to grazing, the bend still grows a little: a tenth more.
+        return (low * 1.1, high * 1.1)
     }
 
     /// The direction it travels in the water under a flat surface.
@@ -219,7 +244,7 @@ public final class Caustics: Effect {
         guard let light = Self.lightSource(frame) else { return }
         let strength = frame.number("strength", default: 1) * (frame.accessibility.reduceStrength ? 0.6 : 1)
         let dark = frame.appearance == .dark
-        let peak = frame.number(dark ? "darkAlpha" : "lightAlpha", default: dark ? 0.14 : 0.12) * strength
+        let peak = Self.peak(frame, isMoon: light.isMoon) * strength
         guard peak > 0 else { return }
 
         let depth = Self.bounded(frame.number("waterDepth", default: 28), 10...60) * 10   // mm
@@ -241,11 +266,14 @@ public final class Caustics: Effect {
         // As far as the steepest likely surface (three times the mean slope, a full gust on top)
         // can bend the light at this sun, plus a little for the splats' own width.
         let steepest = slope * 3 * 1.3 * (1 + Self.gustGain)
-        let margin = Self.deflection(incident: Self.incidentDirection(light.position), slope: steepest, depth: depth) + 6
+        let bent = Self.deflection(incident: Self.incidentDirection(light.position), slope: steepest, depth: depth)
+        // A surface point lights the floor at p + shift + bend, so the points to draw run from
+        // the floor's origin minus the largest bend to its far edge minus the smallest.
+        let margin = SIMD2<Double>(6, 6)
         // The surface points sit on one grid fixed to the water, whatever the display: moving a
         // display moves which points are drawn, not where they are.
-        let regionOrigin = ((floorOrigin - shift - SIMD2(margin, margin)) / Self.spacing).rounded(.down) * Self.spacing
-        let regionSize = floorSize + SIMD2(2 * margin + Self.spacing, 2 * margin + Self.spacing)
+        let regionOrigin = ((floorOrigin - shift - bent.high - margin) / Self.spacing).rounded(.down) * Self.spacing
+        let regionSize = floorOrigin + floorSize - shift - bent.low + margin - regionOrigin + Self.spacing
         let extent = regionSize / Self.spacing
         guard extent.x.isFinite, extent.y.isFinite, extent.x * extent.y <= Double(Self.pointCapacity) else {
             throw CausticsError("a display of \(Int(floorSize.x)) × \(Int(floorSize.y)) mm is too large for the water")
@@ -314,11 +342,11 @@ public final class Caustics: Effect {
             splat.drawPrimitives(type: .triangleStrip, vertexStart: 0, vertexCount: 4, instanceCount: columns * rows)
         }
 
-        // Clouds melt the net towards flat water (D20). Entry and exit do not, unlike komorebi's
+        // Clouds melt the net towards its mean (D20). Entry and exit do not, unlike komorebi's
         // (D23): the net comes and goes with presence alone. Water has no uniform shade to show
         // first, and with presence² it stayed invisible for two seconds after "see it now"; an
         // exit-only melt would make the net jump when input cuts an entry short (2026-11-21).
-        let contrast = 1 - min(max(frame.environment.sunOcclusion, 0), 1)
+        let hidden = min(max(frame.environment.sunOcclusion, 0), 1)
         // A low sun or a setting moon fades the whole overlay, so its last frame is clear.
         let shown = peak * light.weight
         let colour: SIMD3<Float> = switch (dark, light.isMoon) {
@@ -328,15 +356,37 @@ public final class Caustics: Effect {
         case (false, true): SIMD3(0.003, 0.008, 0.018)
         }
         var composite = CompositeUniforms(
-            output: SIMD4(Float(shown), dark ? 1 : 0, Float(Self.bounded(frame.number("exposure", default: 1.2), 0.3...4)), Float(contrast)),
+            output: SIMD4(Float(shown), dark ? 1 : 0, Float(Self.bounded(frame.number("exposure", default: 1.2), 0.3...4)), Float(hidden)),
             colour: SIMD4(colour, 0))
+        let mean = try meanBuffer(display: view.id)
+        if hidden > 0 {
+            encoder.compute { compute in
+                compute.setComputePipelineState(meanPipeline)
+                compute.setTexture(target, index: 0)
+                compute.setSamplerState(sampler, index: 0)
+                compute.setBytes(&composite, length: MemoryLayout<CompositeUniforms>.stride, index: 0)
+                compute.setBuffer(mean, offset: 0, index: 1)
+                compute.dispatchThreadgroups(MTLSize(width: 1, height: 1, depth: 1),
+                                             threadsPerThreadgroup: MTLSize(width: 256, height: 1, depth: 1))
+            }
+        }
         encoder.renderToOutput { output in
             output.setRenderPipelineState(compositePipeline)
             output.setFragmentTexture(target, index: 0)
             output.setFragmentSamplerState(sampler, index: 0)
             output.setFragmentBytes(&composite, length: MemoryLayout<CompositeUniforms>.stride, index: 0)
+            output.setFragmentBuffer(mean, offset: 0, index: 1)
             output.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
         }
+    }
+
+    private func meanBuffer(display: UInt32) throws -> any MTLBuffer {
+        if let buffer = means[display] { return buffer }
+        guard let buffer = device.makeBuffer(length: MemoryLayout<Float>.stride, options: .storageModePrivate) else {
+            throw CausticsError("could not make the mean buffer")
+        }
+        means[display] = buffer
+        return buffer
     }
 
     private func landingBuffer(display: UInt32, count: Int) throws -> any MTLBuffer {
