@@ -27,12 +27,12 @@ import NagiKit
     let available: [any Effect.Type] = EffectCatalog.all + [PatchEffect.self, LensEffect.self, WindowCheckEffect.self]
     let ids = effectList.split(separator: ",").map(String.init)
     guard Set(ids).count == ids.count else { throw NagiCoreError("an effect is listed twice") }
-    let types = try ids.map { id in
-        guard let type = available.first(where: { $0.descriptor.id == id }) else {
-            throw NagiCoreError("unknown effect \(id); known: \(available.map { $0.descriptor.id }.joined(separator: ", "))")
-        }
-        return type
+    for id in ids where !available.contains(where: { $0.descriptor.id == id }) {
+        throw NagiCoreError("unknown effect \(id); known: \(available.map { $0.descriptor.id }.joined(separator: ", "))")
     }
+    // In the app's order, whatever the order on the command line: effects of the same layer are
+    // drawn in that order (komorebi under caustics), so the same selection gives the same frame.
+    let types = available.filter { ids.contains($0.descriptor.id) }
     guard let device = MTLCreateSystemDefaultDevice() else { throw NagiCoreError("no Metal device") }
     let renderer = try FrameRenderer(device: device, effects: types)
     renderer.parameters = Dictionary(uniqueKeysWithValues: types.map { ($0.descriptor.id, options.parameters) })

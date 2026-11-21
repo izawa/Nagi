@@ -1,3 +1,4 @@
+import CausticsEffect
 import KomorebiEffect
 import MossEffect
 import RainEffect
@@ -9,6 +10,7 @@ public enum EffectCatalog {
     public static var all: [any Effect.Type] {
         [
             Komorebi.self,
+            Caustics.self,
             Rain.self,
             Moss.self,
         ]

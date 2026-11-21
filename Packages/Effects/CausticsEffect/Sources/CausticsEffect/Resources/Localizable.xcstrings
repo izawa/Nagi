@@ -1,0 +1,66 @@
+{
+  "sourceLanguage": "ja",
+  "strings": {
+    "水中の光": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Light Under Water"
+          }
+        }
+      }
+    },
+    "浅い水の底に揺れる光": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Light rippling on the floor of shallow water"
+          }
+        }
+      }
+    },
+    "月明かり": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Moonlight"
+          }
+        }
+      }
+    },
+    "日が沈んでいます。水中の光は月明かりで薄く現れます": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The sun has set. The light under water shows faintly by moonlight"
+          }
+        }
+      }
+    },
+    "日が低いので、水中の光は現れません": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The sun is too low for the light under water"
+          }
+        }
+      }
+    },
+    "日が沈んでいるので、水中の光は現れません": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The sun has set, so the light under water does not show"
+          }
+        }
+      }
+    }
+  },
+  "version": "1.0"
+}
