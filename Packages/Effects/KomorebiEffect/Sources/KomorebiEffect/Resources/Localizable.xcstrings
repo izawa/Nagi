@@ -31,12 +31,12 @@
         }
       }
     },
-    "風の強さ": {
+    "葉の揺れ": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Wind"
+            "value": "Leaf Sway"
           }
         }
       }

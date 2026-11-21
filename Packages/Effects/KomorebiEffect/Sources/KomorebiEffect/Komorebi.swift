@@ -29,7 +29,7 @@ public final class Komorebi: Effect {
             // (DECISIONS D26); the rest are the author's tuning (the gallery, not translated).
             ParameterSpec(key: "density", label: localized("樹冠の密度"), kind: .slider(range: 0.3...1.5, defaultValue: 1),
                           user: .slider(0.8...1.2)),
-            ParameterSpec(key: "wind", label: localized("風の強さ"), kind: .slider(range: 0...1, defaultValue: 0.5),
+            ParameterSpec(key: "wind", label: localized("葉の揺れ"), kind: .slider(range: 0...1, defaultValue: 0.5),
                           user: .steps([.init(label: localized("弱い"), value: 0), .init(label: localized("ふつう"), value: 0.5),
                                         .init(label: localized("強い"), value: 1)])),
             // How far a gust drags the canopy downwind, in trunk amplitudes: 2.5 looked real to the
