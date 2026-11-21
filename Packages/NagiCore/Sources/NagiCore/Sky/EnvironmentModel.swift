@@ -24,6 +24,15 @@ public enum EnvironmentModel {
             self.strongestWind = strongestWind
             self.cloudBias = cloudBias
         }
+
+        /// The weather for a showing "see it now" started: no clouds, so a cloud over the sun
+        /// does not hide what was asked for (2026-11-21, author). A debug sky stays as it is.
+        public func previewing() -> Weather {
+            guard case .natural = sky else { return self }
+            var clear = self
+            clear.sky = .clear
+            return clear
+        }
     }
 
     /// - Parameters:

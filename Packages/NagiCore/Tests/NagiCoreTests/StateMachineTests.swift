@@ -202,3 +202,32 @@ import Testing
     #expect(abs((typing2.depth - typing3.depth) - 16) < 1e-9)
 }
 
+
+/// A showing "see it now" started is marked until nagi is fully gone, so the engine can draw it
+/// under a clear sky; the ordinary showing that may follow, and one that started on its own, are not.
+@Test func previewShowingIsMarkedUntilGone() {
+    var machine = NagiStateMachine(timing: NagiTiming(idleOffset: 0.9))
+    machine.requestPreview(at: 0)
+    #expect(machine.step(.init(now: 0.6, idleReading: 1.5)).startedByPreview)
+    #expect(machine.step(.init(now: 4.7, idleReading: 5.6)).startedByPreview)
+    let expired = machine.step(.init(now: 30.8, idleReading: 31.7))  // the 30 s ended at 30.6
+    #expect(expired.phase == .leaving)
+    #expect(expired.startedByPreview)
+    let gone = machine.step(.init(now: 31.2, idleReading: 32.1))
+    #expect(gone.phase == .active)
+    #expect(!gone.startedByPreview)
+    // The hands still rest: nagi comes back on its own, as an ordinary showing.
+    var time = 32.0
+    var back = machine.step(.init(now: time, idleReading: time + 0.9))
+    while back.phase == .active, time < 400 {
+        time += 1
+        back = machine.step(.init(now: time, idleReading: time + 0.9))
+    }
+    #expect(back.phase == .entering)
+    #expect(!back.startedByPreview)
+
+    var ordinary = NagiStateMachine(timing: NagiTiming(idleOffset: 0.9))
+    let shown = ordinary.step(.init(now: 0, idleReading: 1000))
+    #expect(shown.phase == .entering)
+    #expect(!shown.startedByPreview)
+}

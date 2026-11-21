@@ -49,3 +49,12 @@ struct CloudTests {
         #expect(clear.sunOcclusion == 0 && clear.cloudCover == 0)
     }
 }
+
+/// "See it now" clears the natural sky; a debug sky stays (W3 checks a cloud pass that way).
+@Test func previewClearsOnlyTheNaturalSky() {
+    let natural = EnvironmentModel.Weather(sky: .natural, cloudBias: 0.3).previewing()
+    guard case .clear = natural.sky else { Issue.record("not clear"); return }
+    guard case .cloudPass(start: 5) = EnvironmentModel.Weather(sky: .cloudPass(start: 5)).previewing().sky else {
+        Issue.record("the debug sky changed"); return
+    }
+}

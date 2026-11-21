@@ -245,7 +245,8 @@ import QuartzCore
 
     private func environment(at date: Date) -> SharedEnvironment {
         EnvironmentModel.environment(at: date, location: location ?? EnvironmentModel.defaultLocation(at: date),
-                                     windTime: windClock, seed: 1, weather: weather)
+                                     windTime: windClock, seed: 1,
+                                     weather: output?.startedByPreview == true ? weather.previewing() : weather)
     }
 
     /// "See it now" (SPEC 2.4, M1-PLAN 4.5).

@@ -90,6 +90,9 @@ public struct NagiOutput: Sendable {
     public let depth: Double
     public let nextWake: Double?
     public let leaveDeadline: Double?
+    /// This showing was started by "see it now" (until nagi is fully gone): the engine draws it
+    /// under a clear sky, so a cloud does not hide what was asked for.
+    public var startedByPreview = false
 
     public var showsOverlay: Bool { presence > 0 || phase != .active }
 }
@@ -130,6 +133,8 @@ public struct NagiStateMachine: Sendable {
     /// The last input as known when nagi showed (or a preview was asked for); nil while active
     /// or leaving. Any later input withdraws nagi.
     private var inputAtEntry: Double?
+    /// The current (or last) showing was started by "see it now".
+    private var showingIsPreview = false
 
     public init(timing: NagiTiming = NagiTiming()) {
         self.timing = timing
@@ -193,9 +198,9 @@ public struct NagiStateMachine: Sendable {
                 if previewRequestedAt != nil, idle >= Self.previewStillness {
                     previewRequestedAt = nil
                     previewEndsAt = now + timing.previewDuration
-                    enter(at: now)
+                    enter(at: now, preview: true)
                 } else if idle >= timing.onset && !mediaSuppresses {
-                    enter(at: now)
+                    enter(at: now, preview: false)
                 }
             case .entering, .calm:
                 if inputDetected || (mediaSuppresses && previewEndsAt == nil) { leave(at: now) }
@@ -216,7 +221,8 @@ public struct NagiStateMachine: Sendable {
         }
         return NagiOutput(
             phase: phase, presence: presence(at: now), depth: depth,
-            nextWake: nextWake, leaveDeadline: leaveDeadline
+            nextWake: nextWake, leaveDeadline: leaveDeadline,
+            startedByPreview: showingIsPreview && phase != .active
         )
     }
 
@@ -255,7 +261,8 @@ public struct NagiStateMachine: Sendable {
         max(0, reading - timing.idleOffset)
     }
 
-    private mutating func enter(at now: Double) {
+    private mutating func enter(at now: Double, preview: Bool) {
+        showingIsPreview = preview
         state = timing.entryDuration == 0 ? .calm : .entering(startedAt: now)
         inputAtEntry = previousInputs.map(lastInput) ?? now
     }
