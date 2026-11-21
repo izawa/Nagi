@@ -36,7 +36,7 @@ enum WaveField {
             let angle = heading + fan * 2.4 + (random.next() - 0.5) * 0.3
             // Log-uniform wavelengths, shuffled against the angles.
             let wavelength = 40 * pow(6, random.next())
-            // 8 s for an 8 cm wave: the author found 6 s a little quick at stop W2 (75 % of it).
+            // 8 s for an 8 cm wave at full flow: the author found 6 s a little quick at stop W2.
             let period = 8 * (wavelength / 80).squareRoot() * (0.85 + 0.3 * random.next())
             waves.append(Wave(direction: SIMD2(cos(angle), sin(angle)), number: 2 * .pi / wavelength,
                               amplitude: 1, angularFrequency: 2 * .pi / period, phase: random.next() * 2 * .pi))
@@ -96,7 +96,27 @@ enum WaveField {
         (waves.reduce(0) { $0 + $1.slope * $1.slope } / 2).squareRoot()
     }
 
-    /// Each wave's phase at `time` (wind-clock seconds), wrapped to one cycle in double precision
+    /// The slowest flow, as a share of the full speed (the periods above).
+    static let slowestFlow = 0.2
+
+    /// How far the water has moved by wind-clock `time`, in seconds at full speed. The speed
+    /// wanders between 20 % and 100 % of the full speed (the author's 15–75 % of the speed before
+    /// stop W2), slowly rising and falling over one to three minutes. It is three sines summed, so
+    /// any moment has a closed form and the water never jumps when the speed changes.
+    static func flow(time: Double, seed: UInt64) -> Double {
+        var random = SplitMix(seed: seed &+ 0xF10E)
+        let middle = (1 + slowestFlow) / 2, swing = (1 - slowestFlow) / 2
+        var moved = middle * time
+        for (weight, period) in [(0.5, 170.0), (0.3, 110.0), (0.2, 70.0)] {
+            let p = period * (0.85 + 0.3 * random.next()), start = random.next() * 2 * .pi
+            let angle = (2 * .pi * time / p + start).truncatingRemainder(dividingBy: 2 * .pi)
+            // ∫ sin(2π t / p + start) dt from 0 to time.
+            moved += swing * weight * p / (2 * .pi) * (cos(start) - cos(angle))
+        }
+        return moved
+    }
+
+    /// Each wave's phase at `time` (seconds of flow), wrapped to one cycle in double precision
     /// so a long-running clock does not make the water stutter on the GPU.
     static func phases(_ waves: [Wave], time: Double) -> [Double] {
         waves.map { wave in

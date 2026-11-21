@@ -228,7 +228,7 @@ public final class Caustics: Effect {
         let waves = WaveField.deepened(WaveField.windy(WaveField.waves(count: count, slope: slope, seed: frame.seed),
                                                        wind: frame.environment.wind.velocity),
                                        depth: frame.depth.isFinite ? frame.depth : 0)
-        let phases = WaveField.phases(waves, time: frame.environment.wind.time)
+        let phases = WaveField.phases(waves, time: WaveField.flow(time: frame.environment.wind.time, seed: frame.seed))
         let direction = Self.refractedDirection(light.position)
         let sun = Self.sunCovariance(direction: direction, incident: Self.incidentDirection(light.position), depth: depth)
 

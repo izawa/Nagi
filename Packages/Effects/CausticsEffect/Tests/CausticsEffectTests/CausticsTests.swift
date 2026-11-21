@@ -112,6 +112,25 @@ import Testing
         #expect(a.allSatisfy { $0.wavelength >= 40 && $0.wavelength <= 240 })
     }
 
+    /// The water's speed wanders between the slowest flow and full speed, smoothly, for any seed
+    /// and however long the clock has run.
+    @Test func flowWanders() {
+        for seed: UInt64 in [1, 7, 42] {
+            var slowest = 1.0, fastest = 0.0, previous: Double?
+            for step in 0..<20_000 {
+                let time = 1e6 + Double(step) * 0.05
+                let speed = (WaveField.flow(time: time + 0.01, seed: seed) - WaveField.flow(time: time, seed: seed)) / 0.01
+                slowest = min(slowest, speed)
+                fastest = max(fastest, speed)
+                if let previous { #expect(abs(speed - previous) < 0.01) }
+                previous = speed
+            }
+            #expect(slowest >= WaveField.slowestFlow - 1e-3 && fastest <= 1 + 1e-3)
+            #expect(fastest - slowest > 0.4)
+        }
+        #expect(WaveField.flow(time: 0, seed: 3) == 0)
+    }
+
     /// Long-running clocks: phases stay within one cycle and match the direct sum.
     @Test func phasesWrap() {
         let waves = WaveField.waves(count: 5, slope: 0.07, seed: 1)
