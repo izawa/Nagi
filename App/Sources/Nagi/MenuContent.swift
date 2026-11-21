@@ -103,7 +103,10 @@ struct MenuContent: View {
 struct RowSwitch: ToggleStyle {
     func makeBody(configuration: Configuration) -> some View {
         Toggle(isOn: configuration.$isOn) {
+            // A switch's label does not switch on its own on macOS: clicking the name should.
             configuration.label.frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
+                .onTapGesture { configuration.isOn.toggle() }
         }
         .toggleStyle(.switch)
     }
