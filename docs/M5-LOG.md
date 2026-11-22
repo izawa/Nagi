@@ -215,7 +215,9 @@
 
 ## 段階 E リリース候補(2026-11-22)
 
-版を 0.5.0 にし(5ba45de)、`release.sh --no-notarize` で署名した DMG(`build/Nagi-0.5.0.dmg`、ビルド 71)を作った。公証は通していない(M4 と同じ判断)。`release.sh` は宝石の包みも確かめている。DMG から `/Applications` に入れ、署名を確かめた。試験は 8 つの包みすべてで通った(App 8、NagiKit 5、NagiCore 62、木漏れ日 17、雨 20、苔 8、水中の光 13、宝石 13)。
+版を 0.5.0 にし(5ba45de)、`release.sh --no-notarize` で署名した DMG(`build/Nagi-0.5.0.dmg`、ビルド 71)を作った。公証は通していない(M4 と同じ判断)。`release.sh` は宝石の包みも確かめている。DMG から `/Applications` に入れ、署名を確かめた。
+
+同じ日のうちに、苔の直し(75e9299、`docs/MOSS-LOOK-LOG.md`)を入れた main から DMG を作り直した(ビルド 73、版は 0.5.0 のまま、SHA-256 472f3c6d…0aa0427c)。v0.5.0 はこちらとする。ビルド 71 の DMG は `build/Nagi-0.5.0-build71-oldmoss.dmg` に残した。下の点滅の一覧はビルド 71 の苔で測ったもので、GPU は両方の苔で測っている(負荷の節)。作り直した DMG も `/Applications` に入れ、署名を確かめた。試験は 8 つの包みすべてで通った(App 8、NagiKit 5、NagiCore 62、木漏れ日 17、雨 20、苔 8、水中の光 13、宝石 13)。
 
 ### 点滅の一覧(`Tools/flicker.py --fps 60 --step 1`、画面全体、1 秒に 1 画素あたりの最大の回数、上限 3)
 
