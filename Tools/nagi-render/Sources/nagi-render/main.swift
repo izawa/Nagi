@@ -7,7 +7,8 @@
 // Effects: the app's catalog, plus "patch" (a flat premultiplied colour, for calibration) and
 // "lens" (magnifies the background, as the screen capture will feed it) and "windowcheck" (what
 // the window service sees: outlines, the band where moss would grow, the screen's corners).
-// --param key=value sets an effect parameter (number, true/false, or a choice key).
+// --param key=value sets an effect parameter (number, true/false, or a choice key) for every
+// listed effect; --param id.key=value sets it for that effect only (rain and gems share keys).
 
 import CoreGraphics
 import ImageIO
@@ -35,7 +36,18 @@ import NagiKit
     let types = available.filter { ids.contains($0.descriptor.id) }
     guard let device = MTLCreateSystemDefaultDevice() else { throw NagiCoreError("no Metal device") }
     let renderer = try FrameRenderer(device: device, effects: types)
-    renderer.parameters = Dictionary(uniqueKeysWithValues: types.map { ($0.descriptor.id, options.parameters) })
+    for key in options.parameters.keys where key.contains(".") {
+        let id = String(key.prefix { $0 != "." })
+        guard ids.contains(id) else { throw NagiCoreError("--param \(key): \(id) is not among the listed effects") }
+    }
+    renderer.parameters = Dictionary(uniqueKeysWithValues: types.map { type in
+        let id = type.descriptor.id
+        var values = options.parameters.filter { !$0.key.contains(".") }
+        for (key, value) in options.parameters where key.hasPrefix(id + ".") {
+            values[String(key.dropFirst(id.count + 1))] = value
+        }
+        return (id, values)
+    })
 
     let view = PreviewScene.display(pixels: options.size, physicalSize: options.physicalSize)
     // The same weather hints the live engine mixes in (NagiEngine).

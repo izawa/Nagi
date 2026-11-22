@@ -36,7 +36,7 @@ plist=$app/Contents/Info.plist
 version=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" $plist)
 
 echo "▶ .app を確かめる"
-for bundle in NagiApp_Nagi NagiCore_NagiCore KomorebiEffect_KomorebiEffect RainEffect_RainEffect MossEffect_MossEffect CausticsEffect_CausticsEffect; do
+for bundle in NagiApp_Nagi NagiCore_NagiCore KomorebiEffect_KomorebiEffect RainEffect_RainEffect MossEffect_MossEffect CausticsEffect_CausticsEffect GemsEffect_GemsEffect; do
     [[ -d $app/Contents/Resources/$bundle.bundle ]] || { echo "✗ $bundle.bundle がありません" >&2; exit 1; }
 done
 [[ -f $app/Contents/Resources/AppIcon.icns ]] || { echo "✗ アイコンがありません" >&2; exit 1; }

@@ -111,7 +111,7 @@ private struct PermissionSettings: View {
                 }
             } footer: {
                 VStack(alignment: .leading, spacing: 6) {
-                    Text(String(localized: "雨は、後ろの画面を雨粒で屈折させるために、画面収録の許可を使います。取り込むのは凪が出ているあいだだけで、取り込んだ画面は Mac の GPU の中だけで使い、保存も送信もしません。", bundle: .module))
+                    Text(String(localized: "雨と宝石は、後ろの画面を雨粒や結晶で屈折させるために、画面収録の許可を使います。取り込むのは凪が出ているあいだだけで、取り込んだ画面は Mac の GPU の中だけで使い、保存も送信もしません。", bundle: .module))
                     Text(String(localized: "取り込んでいるあいだは、メニューバーに紫の印が出ます。macOS が、ときどき許可を続けるか確かめることがあります。", bundle: .module))
                 }
                 .foregroundStyle(.secondary)

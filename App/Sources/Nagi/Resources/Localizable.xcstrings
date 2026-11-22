@@ -491,12 +491,12 @@
         }
       }
     },
-    "雨は、後ろの画面を雨粒で屈折させるために、画面収録の許可を使います。取り込むのは凪が出ているあいだだけで、取り込んだ画面は Mac の GPU の中だけで使い、保存も送信もしません。": {
+    "雨と宝石は、後ろの画面を雨粒や結晶で屈折させるために、画面収録の許可を使います。取り込むのは凪が出ているあいだだけで、取り込んだ画面は Mac の GPU の中だけで使い、保存も送信もしません。": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Rain uses Screen Recording to bend the screen behind its drops. Nagi captures the screen only while it shows, uses it only on your Mac’s GPU, and never saves or sends it."
+            "value": "Rain and gems use Screen Recording to bend the screen behind drops and crystals. Nagi captures the screen only while it shows, uses it only on your Mac’s GPU, and never saves or sends it."
           }
         }
       }

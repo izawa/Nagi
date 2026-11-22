@@ -1,0 +1,76 @@
+{
+  "sourceLanguage": "ja",
+  "strings": {
+    "宝石": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Gems"
+          }
+        }
+      }
+    },
+    "動かしていないウィンドウの縁に育つ水晶": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Crystals growing on the edges of windows left still"
+          }
+        }
+      }
+    },
+    "育つ速さ": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Growth Speed"
+          }
+        }
+      }
+    },
+    "ゆっくり": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Slow"
+          }
+        }
+      }
+    },
+    "ふつう": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Normal"
+          }
+        }
+      }
+    },
+    "速い": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Fast"
+          }
+        }
+      }
+    },
+    "生える量": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Amount"
+          }
+        }
+      }
+    }
+  },
+  "version": "1.0"
+}
