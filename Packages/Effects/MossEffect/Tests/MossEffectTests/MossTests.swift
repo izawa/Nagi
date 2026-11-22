@@ -24,6 +24,25 @@ struct MossTests {
         #expect(Moss.growth(age: .nan) == 0)
     }
 
+    /// The light that shapes the cushions: the sun's direction in screen terms, and none of its
+    /// contrast under a cloud or with nothing in the sky (D20: the moss keeps its brightness).
+    @Test func lightFollowsTheSkyAndACloudTakesItsContrast() {
+        var environment = SharedEnvironment()
+        environment.sun = CelestialPosition(altitude: .pi / 4, azimuth: .pi / 2)   // east, 45°
+        let east = Moss.light(environment)
+        #expect(east.x > 0.6 && abs(east.y) < 1e-5 && east.z > 0.6 && east.w == 1)
+        environment.sunOcclusion = 1
+        #expect(Moss.light(environment).w == 0)
+        environment.sunOcclusion = 0
+        environment.sun = CelestialPosition(altitude: -0.5, azimuth: 0)
+        environment.moon = CelestialPosition(altitude: -0.5, azimuth: 0)
+        #expect(Moss.light(environment) == SIMD4(0, 0, 1, 0))
+        environment.moon = CelestialPosition(altitude: .pi / 3, azimuth: .pi)
+        environment.moonPhase = 0.5
+        let moon = Moss.light(environment)
+        #expect(moon.w > 0 && moon.w <= Float(Moss.moonLight) && moon.y > 0)   // a southern moon is screen-down
+    }
+
     @Test func onePatchPerWindowAndNoneInTheScreenCorners() {
         let patches = Moss.patches(snapshot([window(1, CGRect(x: 100, y: 100, width: 600, height: 400))]))
         #expect(patches.count == 1)

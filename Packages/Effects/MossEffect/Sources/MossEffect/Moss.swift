@@ -71,6 +71,12 @@ public final class Moss: Effect {
         var dew: Float
         /// Seconds, for the dew's slow twinkle.
         var time: Float
+        /// 0 … 1 as nagi deepens: the light through the thin leaflets (`deepening(depth:)`).
+        var deep: Float
+        /// 1 for the dark appearance.
+        var dark: Float
+        /// Toward the sun or moon and its directional strength (`light(_:)`).
+        var light: SIMD4<Float>
     }
 
     /// Where moss may grow, in desktop points: a band along a window's top, with the rectangles in
@@ -145,6 +151,28 @@ public final class Moss: Effect {
 
     static func bounded(_ value: Double, _ range: ClosedRange<Double>) -> Double {
         value.isFinite ? min(max(value, range.lowerBound), range.upperBound) : 1
+    }
+
+    /// How much of the moon's light shows as contrast, against the sun's.
+    static let moonLight = 0.15
+
+    /// Toward the light in screen terms (x right, y down, z toward the viewer; screen up is north,
+    /// as for komorebi and gems), and how much it shapes the cushions: the sun, else the moon
+    /// (SkyLight), less what a cloud hides (D20: the moss keeps its brightness, only the contrast
+    /// goes). With no light, only the sky lights the moss.
+    static func light(_ environment: SharedEnvironment) -> SIMD4<Float> {
+        guard let light = SkyLight(environment, moonlight: true) else { return SIMD4(0, 0, 1, 0) }
+        let altitude = light.position.altitude, azimuth = light.position.azimuth
+        let strength = light.weight * (light.isMoon ? moonLight : 1) * (1 - min(max(environment.sunOcclusion, 0), 1))
+        let flat = cos(altitude)
+        return SIMD4(Float(sin(azimuth) * flat), Float(-cos(azimuth) * flat), Float(sin(altitude)), Float(strength))
+    }
+
+    /// The light through the thin leaflets comes in over 30 … 90 seconds of nagi and then holds,
+    /// as the gems' deep light does (principle 4: the stillness deepens).
+    static func deepening(depth: Double) -> Double {
+        let t = depth.isFinite ? min(max((depth - 30) / 60, 0), 1) : 0
+        return t * t * (3 - 2 * t)
     }
 
     /// The dew's slow twinkle (Moss.metal: `sin(time × 0.42)`), seconds.
@@ -246,7 +274,10 @@ public final class Moss: Effect {
                                 dew: Float(Self.dew(sun: frame.environment.sun, depth: depth,
                                                     precipitation: frame.environment.precipitation)),
                                 // Wrapped at a whole number of twinkles, so the dew never jumps.
-                                time: Float(frame.time.truncatingRemainder(dividingBy: Self.twinklePeriod * 200)))
+                                time: Float(frame.time.truncatingRemainder(dividingBy: Self.twinklePeriod * 200)),
+                                deep: Float(Self.deepening(depth: depth) * (frame.accessibility.reduceStrength ? 0.6 : 1)),
+                                dark: frame.appearance == .dark ? 1 : 0,
+                                light: Self.light(frame.environment))
         var size = SIMD2<Float>(Float(encoder.outputSize.x), Float(encoder.outputSize.y))
         encoder.renderToOutput { pass in
             pass.setRenderPipelineState(pipeline)
