@@ -51,9 +51,6 @@ public final class Caustics: Effect {
     static let refractiveIndex = 1.333
     /// Desktop-wide scale for display origins, so neighbouring displays meet in the water.
     static let desktopMillimetresPerPoint = 25.4 / 109
-    /// The light rises from 5° to 10° above the horizon (komorebi's, D16).
-    static let cutoffAltitude = 5 * Double.pi / 180
-    static let fadeAltitude = 10 * Double.pi / 180
 
     struct SplatUniforms {
         /// Sample region origin (mm), spacing (mm), columns.
@@ -149,16 +146,9 @@ public final class Caustics: Effect {
 
     // MARK: - Light
 
-    /// The sun by day; the moon at night if moonlight is on. Weight 0 … 1 (komorebi's rule, D21).
-    static func lightSource(_ frame: FrameState) -> (position: CelestialPosition, weight: Double, isMoon: Bool)? {
-        let environment = frame.environment
-        let day = smooth(cutoffAltitude, fadeAltitude, environment.sun.altitude)
-        if day > 0 { return (environment.sun, day, false) }
-        guard frame.flag("moonlight", default: true) else { return nil }
-        let darkness = 1 - smooth(-6 * .pi / 180, 0, environment.sun.altitude)
-        let lit = (1 - cos(2 * .pi * environment.moonPhase)) / 2
-        let weight = darkness * smooth(cutoffAltitude, fadeAltitude, environment.moon.altitude) * max(0, (lit - 0.01) / 0.99)
-        return weight > 0 ? (environment.moon, weight, true) : nil
+    /// The sun by day; the moon at night if moonlight is on (SkyLight, komorebi's rule, D21).
+    static func lightSource(_ frame: FrameState) -> SkyLight? {
+        SkyLight(frame.environment, moonlight: frame.flag("moonlight", default: true))
     }
 
     public static func note(_ frame: FrameState) -> LocalizedStringResource? {
@@ -181,7 +171,7 @@ public final class Caustics: Effect {
     /// The direction light travels in the air towards the water (x east, y south, z up), from a
     /// light source at `position`.
     static func incidentDirection(_ position: CelestialPosition) -> SIMD3<Double> {
-        let altitude = max(position.altitude, cutoffAltitude)
+        let altitude = max(position.altitude, SkyLight.cutoffAltitude)
         return -SIMD3(cos(altitude) * sin(position.azimuth), -cos(altitude) * cos(position.azimuth), sin(altitude))
     }
 

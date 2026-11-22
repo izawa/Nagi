@@ -9,14 +9,17 @@ struct Instance {
     float4 axis;    // root x, y; unit axis toward the tip x, y (pixels, y down)
     float4 shape;   // length, width (pixels), spin 0…1, number of fronts
     float4 tint;    // body colour (linear), grown 0…1
+    float4 light;   // the cluster's deep light x, y, its depth behind the screen (pixels)
     float4 fronts[16];
 };
 
 struct Uniforms {
     float4 target;  // output width, height, pixels per point, 1 when dark
-    float4 light;   // toward the sun (x right, y down, z out), strength
-    float4 look;    // refraction, ridge, highlight, dispersion
+    float4 light;   // toward the sun or moon (x right, y down, z out), the glint's strength
+    float4 look;    // refraction, ridge, (unused), dispersion
     float4 glow;    // glow strength, the quad's margin (pixels), presence
+    float4 glint;   // the glint's colour
+    float4 deep;    // the deep light's strength, how much the body around it darkens (light screen)
 };
 
 struct GemOut {
@@ -148,6 +151,20 @@ fragment float4 gemFragment(GemOut in [[stage_in]], texture2d<float> backdrop [[
     float grazing = pow(1 - normal.z, 3.0);
     float3 sky = dark ? float3(0.018, 0.022, 0.03) : float3(0.93, 0.95, 0.98);
     colour = mix(colour, sky, 0.5 * grazing);
+    // The deep light: a point behind the root, seen through each face. A face tilted by `tilt`
+    // shows it displaced along the tilt, so one point falls apart at the ridges into several
+    // images. Soft, a few points across, and less in small and young crystals, so the base does
+    // not light up as a row of lamps. On a dark screen a pale image; on a light one the stone's
+    // deeper colour, read by colour and shape (no light brighter than white, M5-PLAN 3).
+    if (u.deep.x > 0) {
+        float sigma = 2.5 * scale;
+        float2 image = c.light.xy + c.light.z * tilt;
+        float d2 = length_squared(p - image) / (sigma * sigma);
+        float k = u.deep.x * c.tint.w * clamp(W / (14 * scale), 0.25, 1.0);
+        float core = exp(-0.5 * d2) * k;
+        if (!dark) colour *= 1 - 0.6 * u.deep.y * k * (exp(-0.125 * d2) - exp(-0.5 * d2));
+        colour = mix(colour, dark ? lineColour : glowColour, core);
+    }
     // Lines along the crystal's straight edges (the author at W1: refraction alone was hard to
     // see): where two faces meet, the outline, and where the tip faces begin. White for quartz,
     // pale blue for aquamarine and topaz. On a light screen a thin grey beside the line lets a
@@ -163,8 +180,8 @@ fragment float4 gemFragment(GemOut in [[stage_in]], texture2d<float> backdrop [[
     // face that is never quite flat.
     float band = exp(-pow((v / max(L, 1e-3) - 0.62) / 0.12, 2.0));
     // The glint comes in after the stone on entry and goes first on leaving (glow.z: presence).
-    float glint = pow(max(dot(screenNormal, h), 0.0), 300.0) * u.light.w * u.look.z * u.glow.z * band;
-    colour += glint * (dark ? 0.15 : 0.25);
+    float glint = u.light.w > 0 ? pow(max(dot(screenNormal, h), 0.0), 300.0) * u.light.w * u.glow.z * band : 0;
+    colour += glint * (dark ? 0.15 : 0.25) * u.glint.rgb;
 
     // The glow lies over the stone too, a little.
     colour = mix(colour, glowColour, glow * 0.5);

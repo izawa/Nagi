@@ -33,6 +33,11 @@ public final class Gems: Effect {
             ParameterSpec(key: "highlight", label: "照りの強さ", kind: .slider(range: 0...2, defaultValue: 1)),
             ParameterSpec(key: "dispersion", label: "分散", kind: .slider(range: 0...1, defaultValue: 0)),
             ParameterSpec(key: "glow", label: "グロー", kind: .slider(range: 0...2, defaultValue: 1)),
+            // The deep light's strongest mix at the centre of its images, and how much the body
+            // around it darkens on a light screen: both full, the author's choice at W3 (0.6 was
+            // too faint; without the darkening quartz on white shows no light).
+            ParameterSpec(key: "deepLight", label: "奥の光", kind: .slider(range: 0...1, defaultValue: 1)),
+            ParameterSpec(key: "deepen", label: "光のまわりを濃く", kind: .slider(range: 0...1, defaultValue: 1)),
         ])
 
     /// Points around a crystal's quad for its glow, soft contact shadow and smooth edges.
@@ -48,6 +53,8 @@ public final class Gems: Effect {
         var shape: SIMD4<Float>
         /// The stone's body colour (linear), and how far the crystal has grown (0 … 1).
         var tint: SIMD4<Float>
+        /// The cluster's deep light (x, y), how far behind the screen it is, all in pixels.
+        var light: SIMD4<Float>
         var fronts: (SIMD4<Float>, SIMD4<Float>, SIMD4<Float>, SIMD4<Float>,
                      SIMD4<Float>, SIMD4<Float>, SIMD4<Float>, SIMD4<Float>,
                      SIMD4<Float>, SIMD4<Float>, SIMD4<Float>, SIMD4<Float>,
@@ -64,7 +71,15 @@ public final class Gems: Effect {
         /// The glow's strength, the quad's margin in pixels (the glow is gone before it), and the
         /// presence the glint follows (the core fades the whole output by it as well).
         var glow: SIMD4<Float>
+        /// The glint's colour (white in the sun, silver-blue in the moon).
+        var glintColour: SIMD4<Float>
+        /// The deep light's strength now, and how much the body around it darkens on a light screen.
+        var deep: SIMD4<Float>
     }
+
+    /// A full moon high in a dark sky glints this much of the sun (M5-PLAN 3; komorebi's 0.15, D27).
+    static let moonGlint = 0.15
+    static let moonColour = SIMD3<Float>(0.80, 0.87, 1.0)
 
     /// The body colours (linear): clear quartz, pale green-blue aquamarine, pale clear blue topaz,
     /// pale pink morganite, pale green prasiolite.
@@ -78,14 +93,21 @@ public final class Gems: Effect {
         }
     }
 
-    /// Toward the sun in screen terms (screen up is north, as for komorebi), and how strongly it
-    /// lights: none below 5°, full from 10° (as komorebi and the light under water).
-    static func sunlight(_ sun: CelestialPosition) -> SIMD4<Float> {
-        let altitude = sun.altitude, azimuth = sun.azimuth
-        let t = min(max((altitude * 180 / .pi - 5) / 5, 0), 1)
-        let strength = t * t * (3 - 2 * t)
+    /// Toward the light in screen terms (screen up is north, as for komorebi), and how strongly it
+    /// glints: the sun from 10° (none below 5°), else the moon (SkyLight); a cloud takes away the
+    /// direct light it hides (DECISIONS D20: the stone itself stays as it is).
+    static func light(_ environment: SharedEnvironment) -> SIMD4<Float> {
+        guard let light = SkyLight(environment, moonlight: true) else { return SIMD4(0, 0, 1, 0) }
+        let altitude = light.position.altitude, azimuth = light.position.azimuth
+        let strength = light.weight * (light.isMoon ? moonGlint : 1) * (1 - min(max(environment.sunOcclusion, 0), 1))
         let flat = cos(altitude)
         return SIMD4(Float(sin(azimuth) * flat), Float(-cos(azimuth) * flat), Float(sin(altitude)), Float(strength))
+    }
+
+    /// The deep light comes in over 30 … 90 seconds of nagi and then holds (M5-PLAN 5).
+    static func deepening(depth: Double) -> Double {
+        let t = depth.isFinite ? min(max((depth - 30) / 60, 0), 1) : 0
+        return t * t * (3 - 2 * t)
     }
 
     static func bounded(_ value: Double, _ range: ClosedRange<Double>, default fallback: Double) -> Double {
@@ -150,6 +172,7 @@ public final class Gems: Effect {
                     shape: SIMD4(Float(crystal.length * scale), Float(crystal.width * scale * crystal.length / crystal.fullLength),
                                  Float(crystal.spin), Float(min(cluster.fronts.count, Self.frontCapacity))),
                     tint: SIMD4(Self.tint(crystal.stone), Float(crystal.length / crystal.fullLength)),
+                    light: SIMD4(lowHalf: pixels(cluster.light), highHalf: SIMD2(Float(cluster.lightDepth * scale), 0)),
                     fronts: (fronts[0], fronts[1], fronts[2], fronts[3], fronts[4], fronts[5], fronts[6], fronts[7],
                              fronts[8], fronts[9], fronts[10], fronts[11], fronts[12], fronts[13], fronts[14], fronts[15])))
             }
@@ -157,16 +180,29 @@ public final class Gems: Effect {
         guard !instances.isEmpty,
               let buffer = device.makeBuffer(bytes: &instances, length: MemoryLayout<Instance>.stride * instances.count,
                                              options: .storageModeShared) else { return }
+        let isMoon = SkyLight(frame.environment, moonlight: true)?.isMoon ?? false
+        // Increase Contrast or Reduce Transparency: the glint, deep light and glow weaker; the
+        // stone stays whole (half a refracting stone would show the text twice). Reduce Motion:
+        // the glint swings less as the sun goes in and out.
+        let weaker = frame.accessibility.reduceStrength ? 0.6 : 1
+        let presence = min(max(frame.presence, 0), 1)
+        var light = Self.light(frame.environment)
+        light.w *= Float(weaker * (frame.accessibility.reduceMotion ? 0.25 : 1)
+                         * Self.bounded(frame.number("highlight", default: 1), 0...2, default: 1))
         var uniforms = Uniforms(
             target: SIMD4(Float(encoder.outputSize.x), Float(encoder.outputSize.y), Float(scale),
                           frame.appearance == .dark ? 1 : 0),
-            light: Self.sunlight(frame.environment.sun),
+            light: light,
             look: SIMD4(Float(Self.bounded(frame.number("refraction", default: 0.35), 0...1, default: 0.35)),
                         Float(Self.bounded(frame.number("ridge", default: 0.7), 0...1, default: 0.7)),
-                        Float(Self.bounded(frame.number("highlight", default: 1), 0...2, default: 1)),
+                        1,
                         Float(Self.bounded(frame.number("dispersion", default: 0), 0...1, default: 0))),
-            glow: SIMD4(Float(Self.bounded(frame.number("glow", default: 1), 0...2, default: 1)),
-                        Float(Self.margin * scale), Float(min(max(frame.presence, 0), 1)), 0))
+            glow: SIMD4(Float(Self.bounded(frame.number("glow", default: 1), 0...2, default: 1) * weaker),
+                        Float(Self.margin * scale), Float(presence), 0),
+            glintColour: SIMD4(isMoon ? Self.moonColour : SIMD3(1, 1, 1), 0),
+            deep: SIMD4(Float(Self.bounded(frame.number("deepLight", default: 1), 0...1, default: 1)
+                              * Self.deepening(depth: frame.depth) * presence * weaker),
+                        Float(Self.bounded(frame.number("deepen", default: 1), 0...1, default: 1)), 0, 0))
         var margin = Float(Self.margin * scale)
         encoder.renderToOutput { pass in
             pass.setRenderPipelineState(pipeline)

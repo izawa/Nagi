@@ -48,6 +48,11 @@ struct Cluster: Equatable, Sendable {
     /// The rectangle every crystal of the cluster fits in when fully grown, points.
     var bounds: CGRect
     var fronts: [CGRect]
+    /// The deep light (M5-PLAN 2): a glowing point a little behind the cluster's root, seen through
+    /// its crystals, and how far behind the screen it is, points. Fixed by the cluster's place and
+    /// size, never by what covers it, so its images stay put as windows come and go.
+    var light: CGPoint
+    var lightDepth: Double
 }
 
 /// One edge of a window, walked clockwise from its upper-left corner, with the direction out of
@@ -183,6 +188,7 @@ enum Placement {
         let reach = mainLength * 0.5
         var crystals: [Crystal] = []
         var bounds = CGRect.null
+        var light = root
         for i in 0..<(1 + middles + smalls) {
             let crystalSeed = hash(seed, 8 + UInt32(i))
             let side = i.isMultiple(of: 2) ? -1.0 : 1.0
@@ -214,6 +220,11 @@ enum Placement {
             let width = fullLength * slender
             let base = CGPoint(x: root.x + edge.direction.dx * offset, y: root.y + edge.direction.dy * offset)
             let angle = edge.outward + lean
+            // The deep light sits behind the main crystal's lower part, on its axis, so the faces
+            // of that crystal split it (even before the crystal shows).
+            if i == 0 {
+                light = CGPoint(x: base.x + sin(angle) * fullLength * 0.22, y: base.y - cos(angle) * fullLength * 0.22)
+            }
             // Include dormant crystals so the full-grown bounds stay fixed as the cluster grows.
             let dx = sin(angle) * fullLength, dy = -cos(angle) * fullLength
             let segment = CGRect(x: base.x + min(0, dx), y: base.y + min(0, dy), width: abs(dx), height: abs(dy))
@@ -224,7 +235,10 @@ enum Placement {
             crystals.append(Crystal(root: base, angle: angle, length: length, fullLength: fullLength,
                                     width: width, stone: stone, spin: sample(crystalSeed, 5), seed: crystalSeed))
         }
-        return Cluster(windowID: windowID, crystals: crystals, bounds: bounds.insetBy(dx: -4, dy: -4), fronts: [])
+        // Deep enough that the side faces move its images apart, shallow enough that they stay
+        // inside the main crystal (half as wide as 0.12 of its length there).
+        return Cluster(windowID: windowID, crystals: crystals, bounds: bounds.insetBy(dx: -4, dy: -4), fronts: [],
+                       light: light, lightDepth: mainLength * 0.13)
     }
 
     /// The cluster as seen behind the windows in front, or nil if nothing of it shows.
@@ -241,7 +255,10 @@ enum Placement {
         }
         guard !crystals.isEmpty, fronts.count <= maxFronts,
               !fronts.contains(where: { roundedContains($0, bounds) }) else { return nil }
-        return Cluster(windowID: cluster.windowID, crystals: crystals, bounds: bounds, fronts: fronts)
+        var visible = cluster
+        visible.crystals = crystals
+        visible.fronts = fronts
+        return visible
     }
 
     private static func roundedContains(_ window: CGRect, _ rect: CGRect) -> Bool {

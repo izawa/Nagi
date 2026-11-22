@@ -204,4 +204,49 @@ struct PlacementTests {
             #expect(abs(share(stone) - expected) < 0.04)
         }
     }
+
+    /// The deep light stands on the main crystal's axis, the same whatever covers part of the
+    /// cluster or however far it has grown, so its images never jump.
+    @Test func theDeepLightStaysPut() throws {
+        let original = try #require(Placement.clusters(snapshot([window()])).first)
+        let main = original.crystals[0]
+        let rise = main.fullLength * 0.22
+        #expect(abs(original.light.x - (main.root.x + sin(main.angle) * rise)) < 1e-9)
+        #expect(abs(original.light.y - (main.root.y - cos(main.angle) * rise)) < 1e-9)
+        #expect(abs(original.lightDepth - main.fullLength * 0.13) < 1e-9)
+        // A small panel over the main crystal's root takes that crystal away, not its neighbours.
+        let panel = WindowInfo(id: 2, frame: CGRect(x: main.root.x - 2, y: main.root.y - 2, width: 4, height: 4),
+                               role: .occluder, stationarySeconds: 0)
+        let covered = try #require(Placement.clusters(snapshot([panel, window()])).first)
+        #expect(!covered.crystals.contains { $0.seed == main.seed } && !covered.crystals.isEmpty)
+        #expect(covered.light == original.light && covered.lightDepth == original.lightDepth)
+        let young = try #require(Placement.clusters(snapshot([window(age: 2400)])).first)
+        #expect(young.light == original.light && young.lightDepth == original.lightDepth)
+    }
+}
+
+struct LightTests {
+    @Test func theDeepLightComesInFrom30To90Seconds() {
+        #expect(Gems.deepening(depth: 0) == 0)
+        #expect(Gems.deepening(depth: 30) == 0)
+        #expect(abs(Gems.deepening(depth: 60) - 0.5) < 1e-9)
+        #expect(Gems.deepening(depth: 90) == 1)
+        #expect(Gems.deepening(depth: 120) == 1)
+        #expect(Gems.deepening(depth: .nan) == 0)
+    }
+
+    @Test func theMoonGlintsLessAndACloudTakesTheGlint() {
+        var environment = SharedEnvironment()
+        environment.sun = CelestialPosition(altitude: 60 * .pi / 180, azimuth: 1)
+        #expect(Gems.light(environment).w == 1)
+        environment.sunOcclusion = 0.75
+        #expect(Gems.light(environment).w == 0.25)
+        environment.sunOcclusion = 0
+        environment.sun.altitude = -20 * .pi / 180
+        environment.moon = CelestialPosition(altitude: 40 * .pi / 180, azimuth: 2)
+        environment.moonPhase = 0.5
+        #expect(abs(Double(Gems.light(environment).w) - Gems.moonGlint) < 1e-6)
+        environment.moonPhase = 0
+        #expect(Gems.light(environment).w == 0)
+    }
 }

@@ -64,9 +64,6 @@ public final class Komorebi: Effect {
         ]
     )
 
-    /// Below this the sun draws nothing; it fades in up to `fadeAltitude` (radians).
-    static let cutoffAltitude = 5.0 * .pi / 180
-    static let fadeAltitude = 10.0 * .pi / 180
     /// Millimetres per desktop point for placing displays in the canopy (a Studio Display's pitch).
     static let desktopMillimetresPerPoint = 25.4 / 109
 
@@ -399,21 +396,9 @@ public final class Komorebi: Effect {
         }
     }
 
-    /// What lights the canopy: the sun by day; at night, if moonlight is on, the moon (DECISIONS
-    /// D21), weighted by how dark the sky is (it comes in through civil twilight), how high the
-    /// moon is (the same 5–10° fade as the sun) and how much of it is lit. Nil when nothing does.
-    static func lightSource(_ frame: FrameState) -> (position: CelestialPosition, weight: Double, isMoon: Bool)? {
-        let environment = frame.environment
-        let day = smoothstep(cutoffAltitude, fadeAltitude, environment.sun.altitude)
-        if day > 0 { return (environment.sun, day, false) }
-        guard frame.flag("moonlight", default: true) else { return nil }
-        let degree = Double.pi / 180
-        let darkness = 1 - smoothstep(-6 * degree, 0, environment.sun.altitude)
-        let lit = (1 - cos(2 * .pi * environment.moonPhase)) / 2
-        // Clear around new moon: under 1 % lit counts as dark, without a step.
-        let phase = max(0, (lit - 0.01) / 0.99)
-        let weight = darkness * smoothstep(cutoffAltitude, fadeAltitude, environment.moon.altitude) * phase
-        return weight > 0 ? (environment.moon, weight, true) : nil
+    /// What lights the canopy: the sun by day; at night, if moonlight is on, the moon (SkyLight).
+    static func lightSource(_ frame: FrameState) -> SkyLight? {
+        SkyLight(frame.environment, moonlight: frame.flag("moonlight", default: true))
     }
 
     // MARK: - Wind
