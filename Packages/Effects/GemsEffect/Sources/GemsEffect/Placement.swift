@@ -157,20 +157,22 @@ enum Placement {
                     guard chosen || (edgeIndex == 0 && placed == 0) else { break }
                     let along = cornerRadius + edge.lead + (Double(section) + 0.2 + 0.6 * sample(seed, 1)) * sectionWidth
                     let root = edge.point(along: along, inward: 1.5)
-                    if let cluster = cluster(windowID: window.id, seed: seed, root: root, edge: edge, age: age,
-                                             heightScale: heightScale, covers: covers.prefix(index)),
-                       fits(cluster.bounds, root: root) {
-                        result.append(cluster)
-                        placed += 1
-                    }
+                    // Where clusters stand depends only on the window and the display: a window in
+                    // front hides one, it never moves the top's cluster to another section.
+                    let grown = cluster(windowID: window.id, seed: seed, root: root, edge: edge, age: age,
+                                        heightScale: heightScale)
+                    guard fits(grown.bounds, root: root) else { continue }
+                    placed += 1
+                    if let visible = cover(grown, with: covers.prefix(index)) { result.append(visible) }
                 }
             }
         }
         return result
     }
 
+    /// The cluster at this age, uncovered; its bounds are those of the grown cluster.
     private static func cluster(windowID: UInt32, seed: UInt32, root: CGPoint, edge: Edge, age: Double,
-                                heightScale: Double, covers: ArraySlice<CGRect>) -> Cluster? {
+                                heightScale: Double) -> Cluster {
         // One main crystal, one to three middle ones leaning out, and six to nine small ones
         // filling the base side by side, their roots overlapping a little, as crystals from one
         // rock (a cluster, as quartz grows: the author at W1). One stone per cluster.
@@ -222,7 +224,13 @@ enum Placement {
             crystals.append(Crystal(root: base, angle: angle, length: length, fullLength: fullLength,
                                     width: width, stone: stone, spin: sample(crystalSeed, 5), seed: crystalSeed))
         }
-        bounds = bounds.insetBy(dx: -4, dy: -4)
+        return Cluster(windowID: windowID, crystals: crystals, bounds: bounds.insetBy(dx: -4, dy: -4), fronts: [])
+    }
+
+    /// The cluster as seen behind the windows in front, or nil if nothing of it shows.
+    private static func cover(_ cluster: Cluster, with covers: ArraySlice<CGRect>) -> Cluster? {
+        var crystals = cluster.crystals
+        let bounds = cluster.bounds
         // The windows in front that may cover anything drawn, the glow included.
         let fronts = covers.filter { $0.intersects(bounds.insetBy(dx: -halo, dy: -halo)) }
         // A crystal covered at its root is left out (its tip would float over the window in
@@ -233,7 +241,7 @@ enum Placement {
         }
         guard !crystals.isEmpty, fronts.count <= maxFronts,
               !fronts.contains(where: { roundedContains($0, bounds) }) else { return nil }
-        return Cluster(windowID: windowID, crystals: crystals, bounds: bounds, fronts: fronts)
+        return Cluster(windowID: cluster.windowID, crystals: crystals, bounds: bounds, fronts: fronts)
     }
 
     private static func roundedContains(_ window: CGRect, _ rect: CGRect) -> Bool {

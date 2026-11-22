@@ -12,6 +12,7 @@ import SwiftUI
 /// Launch arguments for development and measurement (M1-PLAN 7.2):
 /// - `--self-test`: print what loaded as JSON and quit.
 /// - `--trace`: log nagi's transitions to the unified log (subsystem org.izawa.Nagi).
+/// - `--debug-effects id,id…`: register only these effects of the catalog (load measurements).
 /// - `--debug-lens`: also draw a few drifting lenses that magnify the captured screen (needs
 ///   Screen Recording; M2-PLAN stage A).
 /// - `--debug-windows`: also offer the window check, which draws what the window service sees
@@ -152,6 +153,17 @@ import SwiftUI
             SystemSignals.idleSource = { 1000 + ProcessInfo.processInfo.systemUptime }
         }
         var effects = EffectCatalog.all
+        // For measuring with and without an effect: only these are registered (the rest stay as the
+        // user set them).
+        if let ids = Self.value(after: "--debug-effects", in: arguments)?.split(separator: ",").map(String.init) {
+            // A typo would otherwise measure fewer effects than asked for, and look plausible.
+            let unknown = Set(ids).subtracting(effects.map { $0.descriptor.id })
+            guard unknown.isEmpty else {
+                FileHandle.standardError.write(Data("nagi: unknown effect in --debug-effects: \(unknown.sorted().joined(separator: ", "))\n".utf8))
+                exit(2)
+            }
+            effects = effects.filter { ids.contains($0.descriptor.id) }
+        }
         let patch = Self.value(after: "--debug-patch", in: arguments).map(Self.patchParameters)
         // The patch is for calibration and measurement: alone, so nothing else draws with it.
         if patch != nil { effects = [PatchEffect.self] }

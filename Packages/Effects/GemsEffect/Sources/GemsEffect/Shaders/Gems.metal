@@ -16,7 +16,7 @@ struct Uniforms {
     float4 target;  // output width, height, pixels per point, 1 when dark
     float4 light;   // toward the sun (x right, y down, z out), strength
     float4 look;    // refraction, ridge, highlight, dispersion
-    float4 glow;    // glow strength, the quad's margin (pixels)
+    float4 glow;    // glow strength, the quad's margin (pixels), presence
 };
 
 struct GemOut {
@@ -162,7 +162,8 @@ fragment float4 gemFragment(GemOut in [[stage_in]], texture2d<float> backdrop [[
     // A flat face would light all over; the sheen runs across it in a soft band instead, as a
     // face that is never quite flat.
     float band = exp(-pow((v / max(L, 1e-3) - 0.62) / 0.12, 2.0));
-    float glint = pow(max(dot(screenNormal, h), 0.0), 300.0) * u.light.w * u.look.z * band;
+    // The glint comes in after the stone on entry and goes first on leaving (glow.z: presence).
+    float glint = pow(max(dot(screenNormal, h), 0.0), 300.0) * u.light.w * u.look.z * u.glow.z * band;
     colour += glint * (dark ? 0.15 : 0.25);
 
     // The glow lies over the stone too, a little.

@@ -85,6 +85,31 @@ struct PlacementTests {
         #expect(cluster.crystals.count < original.crystals.count)
     }
 
+    /// Covering the top's only cluster hides it: no cluster takes its place elsewhere, and the
+    /// others keep their roots and stones.
+    @Test func aCoveredClusterIsNotReplaced() throws {
+        // The least amount, so most windows have only the cluster every top must have.
+        var lone = 0
+        for id: UInt32 in 1...32 {
+            let surface = window(id, width: 2400, height: 200)
+            let original = Placement.clusters(snapshot([surface]), amount: 0.3)
+            let top = original.filter { $0.crystals[0].root.y < surface.frame.midY }
+            let hidden = try #require(top.first)
+            if top.count == 1 { lone += 1 }
+            let panel = WindowInfo(id: 99, frame: hidden.bounds.insetBy(dx: -2, dy: -2), role: .occluder,
+                                   stationarySeconds: 0)
+            let covered = Placement.clusters(snapshot([panel, surface]), amount: 0.3)
+            func roots(_ clusters: [Cluster]) -> Set<String> {
+                Set(clusters.map { "\($0.crystals[0].root) \($0.crystals[0].stone)" })
+            }
+            #expect(roots(covered).isSubset(of: roots(original)))
+            #expect(!roots(covered).contains("\(hidden.crystals[0].root) \(hidden.crystals[0].stone)"))
+            // Those clear of the panel are all still there.
+            #expect(roots(original.filter { !$0.bounds.intersects(panel.frame) }).isSubset(of: roots(covered)))
+        }
+        #expect(lone > 0)
+    }
+
     /// A window partly off the display keeps a cluster on its top where one fits.
     @Test func theTopClusterIsOneThatFits() {
         let display = [CGRect(x: 0, y: 0, width: 1600, height: 900)]
@@ -96,6 +121,24 @@ struct PlacementTests {
                 .filter { $0.crystals[0].root.y < surface.frame.midY }
             #expect(!top.isEmpty)
         }
+    }
+
+    /// A window across two displays: each cluster lies wholly on the display under its root
+    /// (each display bends only its own screen), and both displays get some.
+    @Test func noClusterCrossesADisplaySeam() {
+        let areas = [CGRect(x: 0, y: 25, width: 1600, height: 875), CGRect(x: 1600, y: 0, width: 1600, height: 900)]
+        var sides: Set<Int> = []
+        for id: UInt32 in 1...32 {
+            let surface = WindowInfo(id: id, frame: CGRect(x: 1000, y: 200, width: 1200, height: 500),
+                                     role: .surface, stationarySeconds: 14400)
+            for cluster in Placement.clusters(snapshot([surface], areas: areas), amount: 2) {
+                let root = cluster.crystals[0].root
+                let under = areas.firstIndex { $0.contains(root) }
+                #expect(under.map { areas[$0].contains(cluster.bounds) } == true)
+                if let under { sides.insert(under) }
+            }
+        }
+        #expect(sides == [0, 1])
     }
 
     @Test func growthUsesScaledWindowAgeAndStaggersSideCrystals() throws {

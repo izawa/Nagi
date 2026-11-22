@@ -61,7 +61,8 @@ public final class Gems: Effect {
         var light: SIMD4<Float>
         /// Refraction, ridge, highlight, dispersion.
         var look: SIMD4<Float>
-        /// The glow's strength, and the quad's margin in pixels (the glow is gone before it).
+        /// The glow's strength, the quad's margin in pixels (the glow is gone before it), and the
+        /// presence the glint follows (the core fades the whole output by it as well).
         var glow: SIMD4<Float>
     }
 
@@ -165,7 +166,7 @@ public final class Gems: Effect {
                         Float(Self.bounded(frame.number("highlight", default: 1), 0...2, default: 1)),
                         Float(Self.bounded(frame.number("dispersion", default: 0), 0...1, default: 0))),
             glow: SIMD4(Float(Self.bounded(frame.number("glow", default: 1), 0...2, default: 1)),
-                        Float(Self.margin * scale), 0, 0))
+                        Float(Self.margin * scale), Float(min(max(frame.presence, 0), 1)), 0))
         var margin = Float(Self.margin * scale)
         encoder.renderToOutput { pass in
             pass.setRenderPipelineState(pipeline)
