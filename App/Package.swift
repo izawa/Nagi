@@ -10,6 +10,8 @@ let package = Package(
         .executable(name: "Nagi", targets: ["Nagi"]),
         .library(name: "EffectCatalog", targets: ["EffectCatalog"]),
     ],
+    // Moss is out of the release until its redesign; `--traits WithMoss` builds it in.
+    traits: [.trait(name: "WithMoss")],
     dependencies: [
         .package(path: "../Packages/NagiKit"),
         .package(path: "../Packages/NagiCore"),
@@ -23,7 +25,10 @@ let package = Package(
     ],
     targets: [
         // Adding an effect: one package, plus one line in EffectCatalog (SPEC 3.2).
-        .target(name: "EffectCatalog", dependencies: ["NagiKit", "KomorebiEffect", "RainEffect", "MossEffect", "CausticsEffect", "GemsEffect", "RipplesEffect"]),
+        .target(name: "EffectCatalog", dependencies: [
+            "NagiKit", "KomorebiEffect", "RainEffect", "CausticsEffect", "GemsEffect", "RipplesEffect",
+            .product(name: "MossEffect", package: "MossEffect", condition: .when(traits: ["WithMoss"])),
+        ]),
         .executableTarget(
             name: "Nagi",
             dependencies: ["NagiKit", "NagiCore", "EffectCatalog", "DebugEffects"],

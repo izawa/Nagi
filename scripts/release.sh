@@ -36,9 +36,11 @@ plist=$app/Contents/Info.plist
 version=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" $plist)
 
 echo "▶ .app を確かめる"
-for bundle in NagiApp_Nagi NagiCore_NagiCore KomorebiEffect_KomorebiEffect RainEffect_RainEffect MossEffect_MossEffect CausticsEffect_CausticsEffect GemsEffect_GemsEffect RipplesEffect_RipplesEffect; do
+for bundle in NagiApp_Nagi NagiCore_NagiCore KomorebiEffect_KomorebiEffect RainEffect_RainEffect CausticsEffect_CausticsEffect GemsEffect_GemsEffect RipplesEffect_RipplesEffect; do
     [[ -d $app/Contents/Resources/$bundle.bundle ]] || { echo "✗ $bundle.bundle がありません" >&2; exit 1; }
 done
+# Moss stays out of the release (DECISIONS D41).
+[[ ! -e $app/Contents/Resources/MossEffect_MossEffect.bundle ]] || { echo "✗ 苔が入っています" >&2; exit 1; }
 [[ -f $app/Contents/Resources/AppIcon.icns ]] || { echo "✗ アイコンがありません" >&2; exit 1; }
 [[ $(lipo -archs $app/Contents/MacOS/Nagi) == arm64 ]] || { echo "✗ arm64 だけになっていません" >&2; exit 1; }
 [[ $(/usr/libexec/PlistBuddy -c "Print :LSUIElement" $plist) == true ]] || { echo "✗ LSUIElement が無い" >&2; exit 1; }

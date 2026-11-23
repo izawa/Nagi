@@ -27,7 +27,7 @@
    ```sh
    scripts/release.sh
    ```
-   ビルド、タイムスタンプ付きの署名、.app の確かめ、DMG の作成と署名、公証、ステープル、確かめを順に行う。.app の確かめでは、リソースのバンドルとアイコンがあること、arm64 だけであること、`LSUIElement`、entitlement が App Sandbox だけであること、どの署名にもタイムスタンプがあること、Hardened Runtime を見る。
+   ビルド、タイムスタンプ付きの署名、.app の確かめ、DMG の作成と署名、公証、ステープル、確かめを順に行う。.app の確かめでは、リソースのバンドルとアイコンがあること、苔のバンドルが無いこと(D41)、arm64 だけであること、`LSUIElement`、entitlement が App Sandbox だけであること、どの署名にもタイムスタンプがあること、Hardened Runtime を見る。
    DMG の見た目(開いたウインドウの背景と配置、マウントしたときのアイコン)は `scripts/make_dmg.sh` が Finder に設定させる。画面のある Mac で、同じ名前の DMG をマウントしていない状態で実行する。初回は「Finder を操作しようとしています」の許可が要る。
    背景とボリュームのアイコンの絵は `scripts/make_dmg_art.py`(Pillow と numpy)の先頭の `CONFIG` で決まる。アプリのアイコン(`scripts/make-icon.py --render`)か `CONFIG` を直したら、実行して `App/DMG` の画像を作り直し、コミットする。
    公証は数分かかる。終わると `build/Nagi-<版>.dmg` と、その SHA-256(`build/Nagi-<版>.dmg.sha256`)ができる。Apple に送らずに署名までを試すときは `--no-notarize` を付ける。

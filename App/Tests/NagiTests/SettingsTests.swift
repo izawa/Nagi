@@ -7,6 +7,12 @@ import Testing
 /// The settings file (DECISIONS D26).
 struct SettingsTests {
     let effects = EffectCatalog.all
+    /// On by default with the catalog this build has (moss only with the WithMoss trait).
+    #if WithMoss
+    let quiet = ["komorebi", "caustics", "moss"]
+    #else
+    let quiet = ["komorebi", "caustics"]
+    #endif
 
     func decode(_ json: String) throws -> NagiSettings {
         let decoder = JSONDecoder()
@@ -56,10 +62,10 @@ struct SettingsTests {
     @Test func effectsNeedingPermissionStartOff() throws {
         let types: [any Effect.Type] = effects + [GlassStub.self]
         let old = try decode("{}").validated(effects: types)
-        #expect(old.enabledEffects == ["komorebi", "caustics", "moss"])
+        #expect(old.enabledEffects == quiet)
         var switched = try decode("{}")
         switched.setEnabled("komorebi", false, among: types)
-        #expect(switched.enabledEffects == ["caustics", "moss"])
+        #expect(switched.enabledEffects == Array(quiet.dropFirst()))
         #expect(!NagiSettings().isEnabled("test.glass", among: types))
         #expect(try decode(#"{"enabledEffects": ["test.glass"]}"#).validated(effects: types).enabledEffects == ["test.glass"])
         #expect(try decode("{}").effectMode == .all)
@@ -70,10 +76,10 @@ struct SettingsTests {
     @Test func effectsWithNoticeStartOff() throws {
         let types: [any Effect.Type] = effects + [FlashStub.self]
         #expect(!NagiSettings().isEnabled("test.flash", among: types))
-        #expect(try decode("{}").validated(effects: types).enabledEffects == ["komorebi", "caustics", "moss"])
+        #expect(try decode("{}").validated(effects: types).enabledEffects == quiet)
         var chosen = try decode("{}")
         chosen.setEnabled("test.flash", true, among: types)
-        #expect(chosen.validated(effects: types).enabledEffects == ["komorebi", "caustics", "moss", "test.flash"])
+        #expect(chosen.validated(effects: types).enabledEffects == quiet + ["test.flash"])
     }
 
     /// A pause that has run out is cleared.

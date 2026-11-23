@@ -3,7 +3,16 @@
 # bundles and the icon in Contents/Resources, Info.plist, then signs inside out with Developer ID,
 # Hardened Runtime and App Sandbox. The identity comes from $SIGN_IDENTITY or Config/Local.xcconfig.
 # Release signing (with a secure timestamp) is scripts/release.sh's job; this build has none.
+#   scripts/build-app.sh              → without moss (out of the release until its redesign)
+#   scripts/build-app.sh --with-moss  → with moss (the WithMoss trait)
 set -euo pipefail
+
+traits=() moss=false
+case ${1:-} in
+    "") ;;
+    --with-moss) traits=(--traits WithMoss) moss=true ;;
+    *) echo "使い方: $0 [--with-moss]" >&2; exit 2 ;;
+esac
 
 root=${0:A:h:h}
 app=$root/build/Nagi.app
@@ -11,13 +20,17 @@ identity=${SIGN_IDENTITY:-$(sed -nE 's/^SIGN_IDENTITY *= *(.+)$/\1/p' $root/Conf
 [[ -n $identity ]] || { echo "SIGN_IDENTITY is not set (env or Config/Local.xcconfig)" >&2; exit 1; }
 timestamp=${TIMESTAMP:---timestamp=none}
 
-swift build -c release --package-path $root/App --product Nagi
-products=$(swift build -c release --package-path $root/App --show-bin-path)
+swift build -c release --package-path $root/App $traits --product Nagi
+products=$(swift build -c release --package-path $root/App $traits --show-bin-path)
 
 rm -rf $app
 mkdir -p $app/Contents/MacOS $app/Contents/Resources
 /bin/cp -f $products/Nagi $app/Contents/MacOS/Nagi
-for bundle in $products/*.bundle(N); do /bin/cp -R $bundle $app/Contents/Resources/; done
+# The products folder keeps bundles from earlier builds, so moss's may be there from a --with-moss build.
+for bundle in $products/*.bundle(N); do
+    [[ $moss == false && ${bundle:t} == MossEffect_MossEffect.bundle ]] && continue
+    /bin/cp -R $bundle $app/Contents/Resources/
+done
 /bin/cp -f $root/App/AppIcon/AppIcon.icns $app/Contents/Resources/  # drawn by scripts/make-icon.py
 # Info.plist (version, icon, LSUIElement) is App/Info.plist; the build number is the commit count,
 # so each build can be traced to its commit.

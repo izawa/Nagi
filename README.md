@@ -21,7 +21,6 @@ Turn on the ones you like. With several on, Nagi layers them. With **Show One at
 |---|---|---|
 | Komorebi | Sunlight falling through gaps in the canopy, following the time of day and the sun's height; at night, faint moonlight (can be turned off) | Not needed |
 | Rain | Raindrops on glass, refracting the screen behind them | Needed |
-| Moss | Moss growing along the edges of windows you leave in place | Not needed |
 | Light Under Water | Light rippling on the bottom of shallow water | Not needed |
 | Gems | Crystals growing along the edges of windows you leave in place | Needed |
 | Ripples | Ripples from drops falling into a thin layer of water over the screen (off by default; see below) | Needed |
@@ -30,7 +29,7 @@ Click the menu-bar icon for a panel: switch effects, **See It Now** (see a deepe
 
 ## Photosensitivity
 
-Every effect is built so that no pixel flashes more than three times in any one second. Rain still has a known case where a tiny area (about 7 pixels on a 2560 × 1440 screen) flashes four times in a second; a fix is planned. Ripples are a deliberate exception: at the speed of real water waves, text under them flickers more than ten times a second. They are therefore off by default, and a notice sits next to their switch. If you are sensitive to flashing light, leave Ripples off.
+Every effect is built so that no pixel flashes more than three times in any one second. Ripples are a deliberate exception: at the speed of real water waves, text under them flickers more than ten times a second. They are therefore off by default, and a notice sits next to their switch. If you are sensitive to flashing light, leave Ripples off.
 
 ## Privacy
 

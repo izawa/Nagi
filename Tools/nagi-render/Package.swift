@@ -5,10 +5,11 @@ import PackageDescription
 let package = Package(
     name: "nagi-render",
     platforms: [.macOS(.v27)],
+    traits: [.trait(name: "WithMoss")],  // passed on to the app's catalog
     dependencies: [
         .package(path: "../../Packages/NagiKit"),
         .package(path: "../../Packages/NagiCore"),
-        .package(path: "../../App"),
+        .package(path: "../../App", traits: [.defaults, .trait(name: "WithMoss", condition: .when(traits: ["WithMoss"]))]),
         .package(path: "../../Packages/Effects/DebugEffects"),
     ],
     targets: [
