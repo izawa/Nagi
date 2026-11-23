@@ -100,6 +100,10 @@ enum Placement {
     static let halo = 24.0
     /// Sections looked at along one edge, at most (a made-up layout may hold a huge window).
     private static let maxSections = 64
+    /// The amount past which the sections take more clusters (the setting's old most).
+    private static let crowding = 2.0
+    /// The setting's range: at the most, the edges are crusted (the author, 2026-11-23).
+    static let amounts = 0.3...6.0
 
     /// Growth of the main crystal: a bud from 10 minutes, a small pillar (about a third) by 30,
     /// full by two hours (M5-PLAN 4). Quick at first and slowing, as a crystal fed from a solution.
@@ -155,20 +159,41 @@ enum Placement {
                 // In the order a growing amount would choose them, so a larger amount only adds
                 // clusters. Every window with room on top has one there: the first that fits.
                 let order = (0..<count).sorted { sample(sectionSeed($0), 0) < sample(sectionSeed($1), 0) }
-                var placed = 0
-                for section in order {
-                    let seed = sectionSeed(section)
-                    let chosen = sample(seed, 0) < edge.share * amount
-                    guard chosen || (edgeIndex == 0 && placed == 0) else { break }
-                    let along = cornerRadius + edge.lead + (Double(section) + 0.2 + 0.6 * sample(seed, 1)) * sectionWidth
+                // The cluster this many sections along the edge, if it fits on the display.
+                func place(_ seed: UInt32, at position: Double) -> Bool {
+                    let along = cornerRadius + edge.lead + position * sectionWidth
                     let root = edge.point(along: along, inward: 1.5)
                     // Where clusters stand depends only on the window and the display: a window in
                     // front hides one, it never moves the top's cluster to another section.
                     let grown = cluster(windowID: window.id, seed: seed, root: root, edge: edge, age: age,
                                         heightScale: heightScale)
-                    guard fits(grown.bounds, root: root) else { continue }
-                    placed += 1
+                    guard fits(grown.bounds, root: root) else { return false }
                     if let visible = cover(grown, with: covers.prefix(index)) { result.append(visible) }
+                    return true
+                }
+                var placed = 0
+                for section in order {
+                    let seed = sectionSeed(section)
+                    let chosen = sample(seed, 0) < edge.share * amount
+                    guard chosen || (edgeIndex == 0 && placed == 0) else { break }
+                    // Summed in this order so the clusters stay those of the old setting, to the bit.
+                    if place(seed, at: Double(section) + 0.2 + 0.6 * sample(seed, 1)) { placed += 1 }
+                }
+                // Past `crowding`, two more slots per section fill in, as a crust: halfway across
+                // the wider gap beside the first slot, then the section's start. Roots stay at
+                // least a fifth of a section apart, and the clusters above only ever gain.
+                guard amount > crowding else { continue }
+                for section in 0..<count {
+                    // The first slot's place in its section, as a fraction of it.
+                    let first = 0.2 + 0.6 * sample(sectionSeed(section), 1)
+                    let slots = [first <= 0.5 ? (first + 1) / 2 : first / 2, 0]
+                    // The first section's start is too near the corner for a whole cluster.
+                    for (slot, at) in slots.enumerated() where section > 0 || slot == 0 {
+                        let seed = sectionSeed(section + maxSections * (slot + 1))
+                        if Double(slot) + sample(seed, 0) < edge.share * (amount - crowding) {
+                            _ = place(seed, at: Double(section) + at)
+                        }
+                    }
                 }
             }
         }

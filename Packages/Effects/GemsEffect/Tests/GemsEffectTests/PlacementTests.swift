@@ -131,7 +131,7 @@ struct PlacementTests {
         for id: UInt32 in 1...32 {
             let surface = WindowInfo(id: id, frame: CGRect(x: 1000, y: 200, width: 1200, height: 500),
                                      role: .surface, stationarySeconds: 14400)
-            for cluster in Placement.clusters(snapshot([surface], areas: areas), amount: 2) {
+            for cluster in Placement.clusters(snapshot([surface], areas: areas), amount: Placement.amounts.upperBound) {
                 let root = cluster.crystals[0].root
                 let under = areas.firstIndex { $0.contains(root) }
                 #expect(under.map { areas[$0].contains(cluster.bounds) } == true)
@@ -139,6 +139,28 @@ struct PlacementTests {
             }
         }
         #expect(sides == [0, 1])
+    }
+
+    /// More of the setting only adds clusters, up to its most, where every section of the top of a
+    /// clear window holds three, placed at least a fifth of a section apart.
+    @Test func moreOnlyAddsUpToACrust() {
+        func roots(_ clusters: [Cluster]) -> [CGPoint] { clusters.map { $0.crystals[0].root } }
+        for id: UInt32 in 1...16 {
+            let surface = WindowInfo(id: id, frame: CGRect(x: 100, y: 100, width: 1400, height: 900),
+                                     role: .surface, stationarySeconds: 14400)
+            var previous: Set<String> = []
+            for amount in stride(from: 0.3, through: Placement.amounts.upperBound, by: 0.1) {
+                let now = Set(roots(Placement.clusters(snapshot([surface]), amount: amount)).map { "\($0)" })
+                #expect(previous.isSubset(of: now))
+                previous = now
+            }
+            let most = roots(Placement.clusters(snapshot([surface]), amount: Placement.amounts.upperBound))
+            let top = most.filter { $0.y == surface.frame.minY + 1.5 }.map(\.x).sorted()
+            // Five sections on the top; the first section's start is left bare by the corner.
+            #expect(top.count == 3 * 5 - 1)
+            // The main crystal stands up to 0.15 of its 72 pt from its cluster's place.
+            #expect(zip(top, top.dropFirst()).allSatisfy { $1 - $0 >= 48 - 2 * 72 * 0.15 })
+        }
     }
 
     @Test func growthUsesScaledWindowAgeAndStaggersSideCrystals() throws {

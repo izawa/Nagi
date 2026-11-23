@@ -21,8 +21,8 @@ public final class Gems: Effect {
         layer: .surface,
         capabilities: [.windows, .backdrop],
         parameters: [
-            ParameterSpec(key: "amount", label: localized("生える量"), kind: .slider(range: 0.3...2, defaultValue: 1),
-                          user: .slider(0.3...2)),
+            ParameterSpec(key: "amount", label: localized("生える量"), kind: .slider(range: Placement.amounts, defaultValue: 1),
+                          user: .slider(Placement.amounts)),
             ParameterSpec(key: "speed", label: localized("育つ速さ"), kind: .slider(range: 0.25...4, defaultValue: 1),
                           user: .steps([.init(label: localized("ゆっくり"), value: 0.5), .init(label: localized("ふつう"), value: 1),
                                         .init(label: localized("速い"), value: 2)])),
@@ -156,7 +156,7 @@ public final class Gems: Effect {
         }
         let speed = Self.bounded(frame.number("speed", default: 1), 0.25...4, default: 1)
         let height = Self.bounded(frame.number("height", default: 1), 0.5...1.6, default: 1)
-        let amount = Self.bounded(frame.number("amount", default: 1), 0.3...2, default: 1)
+        let amount = Self.bounded(frame.number("amount", default: 1), Placement.amounts, default: 1)
         // Back to front: the windows behind first.
         let clusters = clusters(snapshot, speed: speed, height: height, amount: amount).reversed()
             .filter { $0.bounds.insetBy(dx: -Self.margin, dy: -Self.margin).intersects(view.frameInDesktop) }
