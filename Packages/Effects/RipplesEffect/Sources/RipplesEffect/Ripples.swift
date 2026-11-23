@@ -25,8 +25,8 @@ public final class Ripples: Effect {
             ParameterSpec(key: "amount", label: localized("滴の多さ"), kind: .slider(range: 0.3...2, defaultValue: 1),
                           user: .steps([.init(label: localized("少なめ"), value: 0.6), .init(label: localized("ふつう"), value: 1),
                                         .init(label: localized("多め"), value: 1.3)])),
-            ParameterSpec(key: "height", label: localized("波の高さ"), kind: .slider(range: 0.2...1.5, defaultValue: 1),
-                          user: .slider(0.4...1)),
+            ParameterSpec(key: "height", label: localized("波の高さ"), kind: .slider(range: 0.2...3, defaultValue: 1),
+                          user: .slider(0.4...3)),
             // Tuned in the gallery (W1); not translated (DECISIONS D24).
             ParameterSpec(key: "dent", label: "くぼみの深さ (mm)", kind: .slider(range: 0.5...6, defaultValue: 3)),
             ParameterSpec(key: "impulse", label: "着水の幅 (mm)", kind: .slider(range: 1...8, defaultValue: 3)),
