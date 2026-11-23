@@ -10,8 +10,9 @@ A macOS menu-bar app that brings natural phenomena, such as sunlight through lea
 
 A screen saver only shows when you are away for a while, and a wallpaper stays hidden behind your windows. Nagi doesn't paste in pictures or videos: it computes light and water falling on the screen you are working on, as it happens. The longer you stay still, the deeper the scene grows, and it never settles into a visible loop.
 
-> [!WARNING]
-> Nagi is in early development and isn't distributed yet. To try it, build it from source.
+## Download
+
+Download the DMG from [Releases](https://github.com/izawa/Nagi/releases/latest). Open it, drag Nagi to your Applications folder, and launch it; its icon appears in the menu bar. Nagi needs macOS 27 or later on a Mac with Apple silicon.
 
 ## Effects
 
