@@ -1,0 +1,271 @@
+<!doctype html>
+<html lang="ja" data-lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Nagi（凪）</title>
+<meta name="description" content="手が止まると、作業中の画面に木漏れ日や雨が現れる Mac のメニューバーアプリ。">
+<meta property="og:title" content="Nagi（凪）">
+<meta property="og:description" content="手が止まると、作業中の画面に木漏れ日や雨が現れる Mac のメニューバーアプリ。">
+<meta property="og:image" content="https://izawa.github.io/Nagi/assets/og.jpg">
+<meta property="og:type" content="website">
+<meta name="theme-color" content="#0d1621">
+<link rel="icon" href="assets/icon-128.png">
+<link rel="apple-touch-icon" href="assets/icon-256.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;1,400&family=Shippori+Mincho+B1:wght@400;600&family=Zen+Kaku+Gothic+New:wght@400;500&display=swap">
+<link rel="stylesheet" href="assets/site.css">
+<script>
+  // Before first paint: the language from ?lang=, then the visitor's last choice. Japanese otherwise.
+  (function () {
+    document.documentElement.classList.add("js");
+    var lang = new URLSearchParams(location.search).get("lang");
+    if (lang !== "en" && lang !== "ja") { try { lang = localStorage.getItem("nagi.lang"); } catch (e) {} }
+    if (lang === "en") {
+      document.documentElement.dataset.lang = "en"; document.documentElement.lang = "en";
+      // Keep the choice in the address, so a copied link opens in the same language.
+      var url = new URL(location.href); url.searchParams.set("lang", "en"); history.replaceState(null, "", url);
+    }
+  })();
+</script>
+</head>
+<body>
+
+<div class="calm" aria-hidden="true">
+  <video class="calm-light" muted playsinline loop preload="none">
+    <source src="assets/idle.webm" type="video/webm">
+    <source src="assets/idle.mp4" type="video/mp4">
+  </video>
+</div>
+
+<header class="bar">
+  <a class="mark" href="#top"><img src="assets/icon-128.png" alt="" width="28" height="28"><span>Nagi</span></a>
+  <div class="tools">
+    <button class="hush" type="button" aria-pressed="false">
+      <span lang="ja">動きを止める</span><span lang="en">Stop motion</span>
+    </button>
+    <button class="lang" type="button">
+      <span data-show="ja" lang="en">English</span><span data-show="en" lang="ja">日本語</span>
+    </button>
+  </div>
+</header>
+
+<main id="top">
+
+  <section class="scene hero" style="--from:#0b131d; --to:#0d1621" data-ink="light">
+    <div class="hero-text">
+      <h1 class="kanji">凪</h1>
+      <p class="lead">
+        <span lang="ja">手が止まると、<br>画面に日が差す。</span>
+        <span lang="en">When your hands rest,<br>light falls on the screen.</span>
+      </p>
+      <p class="body">
+        <span lang="ja">Nagi（なぎ）は、作業中のデスクトップに木漏れ日や雨を描く Mac のメニューバーアプリです。キーボードとマウスから手を離して少し待つと、光が現れます。</span>
+        <span lang="en">Nagi is a Mac menu-bar app that brings sunlight through leaves, rain and more onto the desktop you are working on. Take your hands off the keyboard and mouse, wait a moment, and the light appears.</span>
+      </p>
+    </div>
+    <figure class="desk">
+      <img src="assets/desk.jpg" width="1600" height="900" alt="" loading="eager">
+      <figcaption class="hint">
+        <span lang="ja">3 秒ほど、何も触らずにいてみてください。</span>
+        <span lang="en">Try not touching anything for about three seconds.</span>
+      </figcaption>
+    </figure>
+  </section>
+
+  <section class="scene prose" style="--from:#0d1621; --to:#1f2e42" data-ink="light">
+    <h2>
+      <span lang="ja"><span class="ph">風がやむと、</span><span class="ph">海は凪ぐ。</span></span>
+      <span lang="en">When the wind drops, the sea goes calm.</span>
+    </h2>
+    <p>
+      <span lang="ja">キーを打ち、ポインタを動かすことを、風に見立てています。手を動かしているあいだ Nagi は何も描かず、手が止まると現れ、また動かすと 1 秒足らずで引きます。凪（なぎ）は、風がやんで海が静まることです。</span>
+      <span lang="en">Nagi treats your typing and pointing as wind. While your hands move it draws nothing; when they stop it appears, and when they move again it withdraws in under a second. <i>Nagi</i> (凪) is the Japanese word for the calm that settles on the sea when the wind dies down.</span>
+    </p>
+    <p>
+      <span lang="ja">スクリーンセーバーは長く席を離れたときにしか出ず、壁紙はウィンドウに隠れて見えません。Nagi は、開いている文書やウィンドウの上に、光や水を直接描きます。森で本を読むとき目に入るのは、木そのものではなく、頁の上で揺れる木漏れ日です。</span>
+      <span lang="en">A screen saver only appears once you have been away for a while, and a wallpaper stays hidden behind your windows. Nagi draws light and water directly over the documents and windows you have open. When you read in a forest, what you see is not the trees but the sunlight moving on the page.</span>
+    </p>
+  </section>
+
+  <section class="scene prose" style="--from:#1f2e42; --to:#3b4a60" data-ink="light">
+    <h2>
+      <span lang="ja"><span class="ph">止まっているほど、</span><span class="ph">深くなる。</span></span>
+      <span lang="en">The longer you stay still, the deeper it grows.</span>
+    </h2>
+    <p>
+      <span lang="ja">手を止めた直後の表現は控えめです。そのまま考えごとを続けていると、木漏れ日には低い枝の葉影が加わり、雨は本降りになり、結晶の奥にほのかな光がともります。少し手を動かしただけでは、育った景色はやり直しになりません。</span>
+      <span lang="en">Right after you stop, it begins quietly. Keep thinking, and the shadows of low leaves join the sunlight, the rain grows heavy, and a faint light comes on deep inside the crystals. Moving your hands for a moment does not start it all over again.</span>
+    </p>
+    <p>
+      <span lang="ja">どれも、用意した画像や動画を貼ったものではありません。光の屈折、水の波、結晶の育ち方をその場で計算して描くので、決まった動きの繰り返しには見えません。</span>
+      <span lang="en">None of it is a prepared picture or video. Refraction, waves and the growth of crystals are computed as they happen, so the motion never settles into a loop you can see.</span>
+    </p>
+  </section>
+
+  <section class="scene prose" id="sky" style="--from:#3b4a60; --to:#4f5f75" data-ink="light">
+    <h2>
+      <span lang="ja"><span class="ph">いまの、</span><span class="ph">この場所の空。</span></span>
+      <span lang="en">Today's sky, where you are.</span>
+    </h2>
+    <p>
+      <span lang="ja">Nagi が描く光は、架空の空のものではありません。Mac の時計とタイムゾーンから、いまの日時とおおよその場所（タイムゾーンを代表する都市。日本なら東京）を決め、太陽の高さと方位を計算しています。朝は日が低いので影が長く、正午は高い所から光が差し、夕方は光の色が暖かくなります。</span>
+      <span lang="en">The light Nagi draws does not come from an imagined sky. From your Mac's clock and time zone it takes the date, the time and a rough location (the main city of your time zone: Tokyo for Japan), and works out the height and direction of the sun. In the morning the sun is low and the shadows long; at noon the light comes from high up; late in the day it turns warm.</span>
+    </p>
+    <p>
+      <span lang="ja">夜は月を計算します。木漏れ日と水中の光は、いま月がある方向から同じ木と水面を照らし、満ち欠けで明るさを変えます。満月に近いほど明るく、新月のころは何も現れません。</span>
+      <span lang="en">At night it works out the moon. Komorebi and Light Under Water light the same trees and water from where the moon is now, and the phase sets how bright that light is: brighter towards the full moon, and nothing at all around the new moon.</span>
+    </p>
+  </section>
+
+  <section class="scene effect" id="caustics" style="--from:#4f5f75; --to:#d6e6ee; --settle:20%" data-ink="dark">
+    <figure class="media">
+      <video muted playsinline loop preload="none" poster="assets/caustics.jpg">
+        <source src="assets/caustics.webm" type="video/webm"><source src="assets/caustics.mp4" type="video/mp4">
+      </video>
+    </figure>
+    <div class="words">
+      <p class="hour">12:00</p>
+      <h2><span lang="ja">水中の光</span><span lang="en">Light Under Water</span></h2>
+      <p>
+        <span lang="ja">画面を、水深 28 cm の澄んだ水の底に見立てます。波立つ水面で屈折した日の光が、明るい網目になって底を渡ります。網目は、文字を追う目をそらさない遅さで形を変え、雲が日を隠すと溶けて消えます。</span>
+        <span lang="en">The screen becomes the bottom of clear water 28 cm deep. Sunlight refracted by the moving surface crosses it as a bright net. The net changes slowly enough not to pull your eyes from the text, and melts away when a cloud covers the sun.</span>
+      </p>
+    </div>
+  </section>
+
+  <section class="scene effect" id="ripples" style="--from:#d6e6ee; --to:#dfe5e8" data-ink="dark">
+    <figure class="media">
+      <video muted playsinline preload="none" poster="assets/ripples.jpg">
+        <source src="assets/ripples.webm" type="video/webm"><source src="assets/ripples.mp4" type="video/mp4">
+      </video>
+    </figure>
+    <div class="words">
+      <p class="hour">13:00</p>
+      <h2><span lang="ja">波紋</span><span lang="en">Ripples</span></h2>
+      <p class="caution" id="ripples-caution">
+        <span lang="ja">光過敏について：波紋は、文字の上で速く明滅します。そのためアプリでは既定でオフにしています。光に敏感な方は、この映像を再生せず、アプリでもオンにしないでください。</span>
+        <span lang="en">Photosensitivity: ripples make text under them flicker quickly, so they are off by default in the app. If you are sensitive to flashing light, don't play this video, and leave ripples off in the app.</span>
+      </p>
+      <p>
+        <span lang="ja">画面に浅い水が張ってあると見立て、そこへ水滴が落ちます。水には本物の重さと表面張力を与えているので、一つの輪がほどけて何本もの輪の列になり、ディスプレイの縁で跳ね返ります。</span>
+        <span lang="en">Imagine a thin layer of water over the screen, and drops falling into it. The water has the weight and surface tension of real water, so each ring unravels into a train of rings that bounce off the edges of the display.</span>
+      </p>
+      <p class="note"><span lang="ja">波の高さを最大（3 倍）にしたとき</span><span lang="en">With the wave height at its maximum (3×)</span></p>
+      <button class="play" type="button" aria-describedby="ripples-caution" aria-pressed="false">
+        <span class="to-play"><span lang="ja">波紋の映像を再生する</span><span lang="en">Play the ripples video</span></span>
+        <span class="to-stop"><span lang="ja">波紋の映像を止める</span><span lang="en">Stop the ripples video</span></span>
+      </button>
+    </div>
+  </section>
+
+  <section class="scene effect" id="komorebi" style="--from:#dfe5e8; --to:#e9e4dc" data-ink="dark">
+    <figure class="media">
+      <video muted playsinline loop preload="none" poster="assets/komorebi.jpg">
+        <source src="assets/komorebi.webm" type="video/webm"><source src="assets/komorebi.mp4" type="video/mp4">
+      </video>
+    </figure>
+    <div class="words">
+      <p class="hour">15:30</p>
+      <h2><span lang="ja">木漏れ日</span><span lang="en">Komorebi</span></h2>
+      <p>
+        <span lang="ja">葉の隙間は小さな穴として働き、画面に太陽の像を結びます。太陽は見かけの大きさ 0.53° の円盤なので、高い梢の隙間からは大きく柔らかい円が、低い枝からは形のわかる葉影が落ちます。日が傾けば影は長く伸び、夜は、月が出ていれば月明かりに替わります（設定で切れます）。</span>
+        <span lang="en">Each gap between leaves works as a pinhole and casts an image of the sun on the screen. The sun is a disc 0.53° across, so gaps high in the canopy make large, soft circles while low branches leave leaf shadows you can recognise. As the sun sinks the shadows grow long, and at night, when the moon is up, moonlight takes over (you can turn it off).</span>
+      </p>
+    </div>
+  </section>
+
+  <section class="scene effect" id="rain" style="--from:#e9e4dc; --to:#9aa5b2" data-ink="dark">
+    <figure class="media">
+      <video muted playsinline loop preload="none" poster="assets/rain.jpg">
+        <source src="assets/rain.webm" type="video/webm"><source src="assets/rain.mp4" type="video/mp4">
+      </video>
+    </figure>
+    <div class="words">
+      <p class="hour">17:00</p>
+      <h2><span lang="ja">雨</span><span lang="en">Rain</span></h2>
+      <p>
+        <span lang="ja">モニターのガラスに雨粒がつきます。粒に映るのは、いま開いている画面そのものです。粒は近くの粒と合わさって育ち、重くなると小さな粒を残しながら流れ落ちます。本降りになると、画面が少しだけ暗くなります。</span>
+        <span lang="en">Raindrops gather on the glass of your display, and what they refract is the screen you have open. Drops merge with their neighbours, and once heavy enough they run down, leaving small drops behind. When the rain is at its heaviest, the screen dims a little.</span>
+      </p>
+    </div>
+  </section>
+
+  <section class="scene effect" id="gems" style="--from:#9aa5b2; --to:#151e2b; --settle:20%" data-ink="light">
+    <figure class="media">
+      <video muted playsinline loop preload="none" poster="assets/gems.jpg">
+        <source src="assets/gems.webm" type="video/webm"><source src="assets/gems.mp4" type="video/mp4">
+      </video>
+    </figure>
+    <div class="words">
+      <p class="hour">21:00</p>
+      <h2><span lang="ja">宝石</span><span lang="en">Gems</span></h2>
+      <p>
+        <span lang="ja">長く動かさずにいたウィンドウの縁に、水晶が少しずつ育ちます。ときどきアクアマリンや淡いピンクの石が混じります。石は向こうの画面を面ごとに違う向きへ屈折させ、凪が深まると奥にほのかな光がともります。</span>
+        <span lang="en">Crystals grow slowly along the edges of a window you have left in place, now and then an aquamarine or a pale pink stone among the quartz. Each face bends the screen behind it a different way, and as the calm deepens a faint light glows inside.</span>
+      </p>
+      <p class="note"><span lang="ja">生える量を多めにしたとき</span><span lang="en">With the amount set high</span></p>
+    </div>
+  </section>
+
+  <section class="scene prose quiet" style="--from:#151e2b; --to:#0f1825" data-ink="light">
+    <h2>
+      <span lang="ja">静かなままで</span>
+      <span lang="en">Quiet throughout</span>
+    </h2>
+    <ul>
+      <li>
+        <span lang="ja">ネットワークに接続しません。解析や計測のデータも送りません。</span>
+        <span lang="en">Nagi makes no network connections and sends no analytics or telemetry.</span>
+      </li>
+      <li>
+        <span lang="ja">位置情報サービスを使いません。太陽と月は、タイムゾーンから決めたおおよその場所で計算します。</span>
+        <span lang="en">It does not use Location Services. The sun and moon are worked out for a rough location taken from your time zone.</span>
+      </li>
+      <li>
+        <span lang="ja">音を出しません。</span>
+        <span lang="en">It makes no sound.</span>
+      </li>
+      <li>
+        <span lang="ja">既定では、動画の再生やビデオ会議のためにほかのアプリが画面のスリープを止めているあいだは現れません。</span>
+        <span lang="en">By default it stays away while another app keeps the display awake for a video or a video call.</span>
+      </li>
+      <li>
+        <span lang="ja">雨・波紋・宝石は、後ろの画面を写すために画面収録の許可を使います。許可は、それらをオンにしたときに初めて求めます。取り込んだ画面は描画にだけ使い、保存しません。</span>
+        <span lang="en">Rain, Ripples and Gems use the Screen Recording permission to show the screen behind them, and Nagi first asks for it when you turn one of them on. Captured frames are used only for drawing and never saved.</span>
+      </li>
+    </ul>
+  </section>
+
+  <section class="scene get" id="download" style="--from:#0f1825; --to:#0b131d" data-ink="light">
+    <img class="icon" src="assets/icon-256.png" width="128" height="128" alt="">
+    <h2>
+      <span lang="ja"><span class="ph">次に手が止まる</span><span class="ph">ときに。</span></span>
+      <span lang="en">For the next time your hands rest.</span>
+    </h2>
+    <p>
+      <span lang="ja">Nagi はメニューバーで待ち、手を動かしているあいだは何も描きません。</span>
+      <span lang="en">Nagi waits in the menu bar and draws nothing while your hands are busy.</span>
+    </p>
+    <a class="download" href="https://github.com/izawa/Nagi/releases/latest">
+      <span lang="ja">Nagi をダウンロード</span><span lang="en">Download Nagi</span>
+    </a>
+    <p class="needs">
+      <span lang="ja">macOS 27 以降、Apple silicon の Mac。無料、MIT ライセンス。</span>
+      <span lang="en">macOS 27 or later on a Mac with Apple silicon. Free, under the MIT License.</span>
+    </p>
+    <p class="source">
+      <a href="https://github.com/izawa/Nagi"><span lang="ja">ソースコード</span><span lang="en">Source code</span></a>
+    </p>
+  </section>
+
+</main>
+
+<footer class="foot">
+  <p>© 2026 Yukimitsu IZAWA</p>
+</footer>
+
+<script src="assets/site.js" defer></script>
+</body>
+</html>

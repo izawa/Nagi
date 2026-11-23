@@ -1,0 +1,180 @@
+/* Nagi site. One page that runs through a day, night to night; each scene paints its own
+   stretch of the sky (--from at its top, --to at its bottom), so the colours meet at the seams. */
+
+:root {
+  --night: #0d1621;
+  --ink: #1b2430;          /* text on light scenes */
+  --ink-soft: #3c4653;
+  --paper: #e6ecee;        /* text on dark scenes */
+  --paper-soft: #a8b5c2;
+  --dusk: #ebcfae;         /* from the icon's sky */
+  --caution: #8a4b2a;
+  --serif-ja: "Shippori Mincho B1", "Hiragino Mincho ProN", "Yu Mincho", serif;
+  --serif-en: "Cormorant Garamond", "Shippori Mincho B1", Georgia, serif;
+  --sans: "Zen Kaku Gothic New", "Hiragino Sans", system-ui, sans-serif;
+  --gutter: max(20px, env(safe-area-inset-left, 0px));
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+body {
+  margin: 0;
+  background: var(--night);
+  color: var(--paper);
+  font-family: var(--sans);
+  font-size: 17px;
+  line-height: 1.9;
+  -webkit-font-smoothing: antialiased;
+  font-feature-settings: "palt" 0;
+}
+img, video { max-width: 100%; height: auto; display: block; }
+a { color: inherit; }
+:focus-visible { outline: 2px solid var(--dusk); outline-offset: 4px; border-radius: 4px; }
+.scene[data-ink="dark"] :focus-visible { outline-color: var(--ink); }
+.bar :focus-visible { outline-offset: 2px; box-shadow: 0 0 0 5px var(--night); }
+
+/* Language: both texts are in the page; the root says which one shows. */
+html[data-lang="ja"] [lang="en"]:not([data-show]), html[data-lang="en"] [lang="ja"]:not([data-show]),
+html[data-lang="ja"] [data-show="en"], html[data-lang="en"] [data-show="ja"] { display: none; }
+/* Controls that need the script stay out of the page without it. */
+html:not(.js) .tools, html:not(.js) .play, html:not(.js) .hint { display: none; }
+html[data-lang="en"] body { font-size: 18px; line-height: 1.7; }
+
+/* ---------- the calm: light that comes when the visitor stops ---------- */
+
+.calm {
+  position: fixed; inset: 0; z-index: 5; pointer-events: none;
+  mix-blend-mode: multiply;        /* shade over white; invisible over the night */
+  opacity: 0;
+  transition: opacity 0.8s ease-out;
+}
+.calm.on { opacity: 1; transition: opacity 4s ease-in; }
+html.still .calm, html.still .hint { display: none; }
+html.still { scroll-behavior: auto; }
+.calm video { width: 100%; height: 100%; object-fit: cover; }
+
+/* ---------- bar ---------- */
+
+.bar {
+  position: fixed; top: 0; left: 0; right: 0; z-index: 10;
+  display: flex; justify-content: space-between; align-items: center;
+  padding: calc(14px + env(safe-area-inset-top, 0px)) var(--gutter) 14px;
+  color: var(--paper);
+}
+.mark, .tools button {
+  background: rgba(13, 22, 33, 0.82);
+  -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px);
+  border-radius: 999px;
+}
+.mark { padding: 4px 14px 4px 4px; }
+.tools { display: flex; gap: 8px; }
+.mark { display: flex; align-items: center; gap: 10px; text-decoration: none;
+  font-family: var(--serif-en); font-size: 22px; letter-spacing: 0.04em; }
+.mark img { border-radius: 7px; }
+.tools button {
+  font: inherit; font-size: 14px; color: inherit; cursor: pointer;
+  border: 1px solid rgba(230, 236, 238, 0.5); padding: 4px 14px;
+}
+.hush[aria-pressed="true"] { background: var(--paper); color: var(--night); }
+
+/* ---------- scenes ---------- */
+
+.scene {
+  position: relative;
+  background: linear-gradient(to bottom, var(--from), var(--to) var(--settle, 100%));
+  padding: 22vh var(--gutter);
+  padding-right: max(20px, env(safe-area-inset-right, 0px));
+}
+.scene[data-ink="dark"] { color: var(--ink); }
+.scene[data-ink="dark"] .note, .scene[data-ink="dark"] .hour { color: var(--ink-soft); }
+.scene[data-ink="light"] .note, .scene[data-ink="light"] .hour { color: var(--paper-soft); }
+
+h1, h2 { font-family: var(--serif-ja); font-weight: 400; margin: 0; }
+html[data-lang="en"] h2 { text-wrap: balance; }
+.ph { display: inline-block; }  /* Japanese headings break between phrases, not inside them */
+html[data-lang="en"] h2 { font-family: var(--serif-en); font-weight: 500; letter-spacing: 0.005em; }
+
+/* hero */
+.hero { min-height: 100svh; display: grid; align-content: center; gap: 8vh; padding-top: 14vh; padding-bottom: 14vh; }
+.hero-text { max-width: 34rem; }
+.kanji {
+  font-size: clamp(120px, 22vw, 260px); line-height: 1; letter-spacing: 0;
+  color: transparent;
+  background: linear-gradient(to bottom, #f1e2cf 10%, #8fb0cc 70%, #3f74a3);
+  -webkit-background-clip: text; background-clip: text;
+  margin-bottom: 0.25em;
+  animation: dawn 3.2s ease-out both;
+}
+@keyframes dawn { from { opacity: 0; filter: blur(8px); } to { opacity: 1; filter: none; } }
+.lead { font-family: var(--serif-ja); font-size: clamp(26px, 3.6vw, 40px); line-height: 1.55; margin: 0 0 1.2rem; }
+html[data-lang="en"] .lead { font-family: var(--serif-en); font-size: clamp(30px, 4.2vw, 48px); line-height: 1.2; }
+.hero .body { color: var(--paper-soft); margin: 0; max-width: 32rem; }
+
+.desk { margin: 0; max-width: 900px; width: 100%; justify-self: end; }
+.desk img { border-radius: 6px; box-shadow: 0 40px 120px rgba(0, 0, 0, 0.55); }
+.hint { margin-top: 14px; font-size: 14px; color: var(--paper-soft); text-align: right; transition: opacity 1.5s; }
+.hint.gone { opacity: 0; }
+
+@media (min-width: 1100px) {
+  .hero { grid-template-columns: minmax(300px, 0.8fr) 1.4fr; align-items: center; gap: 6vw; }
+}
+
+/* prose scenes */
+.prose { max-width: none; }
+.prose h2, .prose p, .prose ul { max-width: 36rem; margin-left: auto; margin-right: auto; }
+.prose h2 { font-size: clamp(30px, 4.4vw, 52px); line-height: 1.4; margin-bottom: 2.2rem; }
+html[data-lang="en"] .prose h2 { font-size: clamp(34px, 5vw, 60px); line-height: 1.15; }
+.prose p { margin-top: 0; margin-bottom: 1.4rem; }
+.quiet ul { list-style: none; padding: 0; display: grid; gap: 1.1rem; }
+.quiet li { padding-left: 1.4rem; position: relative; }
+.quiet li::before { content: ""; position: absolute; left: 0; top: 0.85em; width: 0.6rem; height: 1px; background: currentColor; opacity: 0.6; }
+
+/* effect scenes: the footage large, the words beside it */
+.effect { display: grid; gap: 4vh; align-items: center; padding-top: 16vh; padding-bottom: 16vh; }
+.media { margin: 0; position: relative; z-index: 6; }  /* the footage stays clear of the calm */
+.media video { width: 100%; aspect-ratio: 16 / 9; object-fit: cover; border-radius: 6px;
+  box-shadow: 0 30px 90px rgba(10, 20, 30, 0.28); background: #c9cfd2; }
+.words { max-width: 30rem; }
+.words h2 { font-size: clamp(40px, 5vw, 64px); line-height: 1.2; margin-bottom: 1.4rem; }
+.words .hour { font-family: var(--serif-en); font-size: 20px; letter-spacing: 0.06em; margin: 0 0 0.4rem; font-variant-numeric: lining-nums; }
+.words p { margin: 0 0 1.2rem; }
+.note { font-size: 14px; }
+.caution {
+  font-size: 15px; line-height: 1.8; color: var(--caution);
+  border-left: 2px solid currentColor; padding-left: 14px;
+}
+.play[aria-pressed="true"] .to-play, .play[aria-pressed="false"] .to-stop { display: none; }
+.play {
+  font: inherit; font-size: 15px; cursor: pointer; color: inherit; background: none;
+  border: 1px solid currentColor; border-radius: 999px; padding: 8px 22px;
+}
+
+@media (min-width: 960px) {
+  .effect { grid-template-columns: minmax(0, 1.65fr) minmax(280px, 1fr); gap: 5vw; }
+}
+
+/* download */
+.get { text-align: center; min-height: 100svh; display: grid; align-content: center; justify-items: center; gap: 0; }
+.get .icon { width: 128px; height: 128px; margin-bottom: 3rem; filter: drop-shadow(0 20px 50px rgba(63, 116, 163, 0.35)); }
+.get h2 { font-size: clamp(30px, 4.4vw, 52px); line-height: 1.4; margin-bottom: 1.4rem; }
+html[data-lang="en"] .get h2 { font-family: var(--serif-en); font-size: clamp(36px, 5vw, 60px); line-height: 1.15; }
+.get p { color: var(--paper-soft); margin: 0 0 2.4rem; max-width: 30rem; }
+.download {
+  display: inline-block; text-decoration: none; font-size: 17px; letter-spacing: 0.04em;
+  color: var(--night); background: var(--paper);
+  border-radius: 999px; padding: 14px 40px; margin-bottom: 1.6rem;
+  transition: background 0.3s;
+}
+.download:hover { background: var(--dusk); }
+.get .needs { font-size: 14px; margin-bottom: 0.6rem; }
+.get .source { font-size: 14px; }
+
+.foot { background: #0b131d; color: #8a97a5; font-size: 13px; text-align: center; padding: 28px var(--gutter) calc(28px + env(safe-area-inset-bottom, 0px)); }
+.foot p { margin: 0; }
+
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  .kanji { animation: none; }
+  .calm, .hint { display: none; }
+}
