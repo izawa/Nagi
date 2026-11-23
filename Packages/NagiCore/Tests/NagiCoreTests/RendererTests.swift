@@ -30,8 +30,10 @@ import Testing
         #expect(abs(p.x - 0.25) < 1e-3 && abs(p.w - 0.25) < 1e-3)
     }
 
-    /// Surface (black, α 0.5, left half) under light (red, premultiplied 0.25, α 0.25).
-    /// Light over surface gives red 0.25; the other order would give 0.125.
+    /// Surface (black, α 0.5, left half) under light (red, premultiplied 0.25, α 0.25), stacked in
+    /// encoded values (D40): red 0.25 · enc(1) over black gives encoded 0.25 at α 0.625, which is
+    /// linear premultiplied 0.625 · dec(0.4) ≈ 0.0831. The other order would give encoded 0.125,
+    /// 0.625 · dec(0.2) ≈ 0.0207, at the same α.
     @Test func layersCompositeBottomToTop() throws {
         let renderer = try FrameRenderer(device: device, effects: [LightPatch.self, SurfacePatch.self])
         renderer.parameters = [
@@ -40,7 +42,7 @@ import Testing
         ]
         let pixels = TextureReader.pixels(of: try renderer.renderOverlay(frame(), view: view))
         let left = pixel(pixels, 0, 0), right = pixel(pixels, 7, 0)
-        #expect(abs(left.x - 0.25) < 1e-3 && abs(left.w - 0.625) < 1e-3)
+        #expect(abs(left.x - 0.0831) < 1e-3 && abs(left.w - 0.625) < 1e-3)
         #expect(abs(right.x - 0.25) < 1e-3 && abs(right.w - 0.25) < 1e-3)
     }
 
@@ -73,6 +75,20 @@ import Testing
         #expect(abs(pixel(pixels, 0, 0).y - 0.5) < 2e-3)
     }
 
+    /// A layer looks the same over a lower layer as over the desktop (D40): black at α 0.1 over
+    /// white gives encoded 0.900 both over an opaque white surface (left half) and over the white
+    /// desktop (right half). Stacked in linear values the left half was 0.955.
+    @Test func aShadeIsTheSameOverALowerLayer() throws {
+        let renderer = try FrameRenderer(device: device, effects: [LightPatch.self, SurfacePatch.self])
+        renderer.parameters = [
+            "test.surface": ["r": .number(1), "g": .number(1), "b": .number(1), "a": .number(1), "x1": .number(4)],
+            "test.light": ["a": .number(0.1)],
+        ]
+        let pixels = TextureReader.pixels(of: try renderer.renderOffscreen(frame(), view: view, background: .gray(1)))
+        #expect(abs(pixel(pixels, 0, 0).x - 0.9) < 2e-3)
+        #expect(abs(pixel(pixels, 7, 0).x - 0.9) < 2e-3)
+    }
+
     /// A `.backdrop` effect sees the screen with the lower layers blended in (SPEC 3.5).
     @Test func backdropIncludesLowerLayers() throws {
         let renderer = try FrameRenderer(device: device, effects: [BackdropProbe.self, SurfacePatch.self])
@@ -83,6 +99,12 @@ import Testing
         let probe = try #require(renderer.instance(of: BackdropProbe.self))
         #expect(probe.sawBackdrop)
         #expect(abs(probe.sampled.x - 0.25) < 2e-3)
+
+        // A coloured lower layer counts too: white at α 0.5 (premultiplied 0.5) over grey 0.5 is
+        // encoded 0.75.
+        renderer.parameters["test.surface"] = ["r": .number(0.5), "g": .number(0.5), "b": .number(0.5), "a": .number(0.5)]
+        _ = try renderer.renderOverlay(frame(), view: display)
+        #expect(abs(probe.sampled.x - 0.75) < 2e-3)
     }
 
     @Test func noBackdropWithoutTheCapability() throws {

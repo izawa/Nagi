@@ -233,9 +233,10 @@ fragment float4 trailFragment(TrailOut in [[stage_in]], texture2d<float> backdro
 // MARK: - Gloom
 
 // The whole screen a little darker while it rains: one triangle over the output, after the drops,
-// that rewrites each pixel drawn so far (read back from the target, no blending). The core blends
-// the layer over the desktop in encoded values (SPEC 3.5), so the new colour and alpha are those
-// that leave the final pixel, desktop and effects alike, darker by the gloom in encoded values.
+// that rewrites each pixel drawn so far (read back from the target, no blending). The core puts
+// the layer over what is below it, desktop and lower layers, in encoded values (SPEC 3.5, D40), so
+// the new colour and alpha are those that leave the final pixel darker by the gloom in encoded
+// values, below and drops alike.
 // Plain black blended in linear values instead darkened a drop by about 3 % against 7 % around
 // it, and could brighten a faint light below.
 

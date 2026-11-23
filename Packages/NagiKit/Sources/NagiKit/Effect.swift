@@ -54,8 +54,9 @@ public protocol EffectEncoder: AnyObject {
     /// The size of the output in pixels.
     var outputSize: SIMD2<Int> { get }
 
-    /// A render pass into the shared output, which already holds the layers below this effect
-    /// (`loadAction` is `.load`). Draw with premultiplied source-over blending:
+    /// A render pass into the effect's layer for this frame (linear, premultiplied). It starts
+    /// clear and keeps what earlier passes of this effect drew (`loadAction` is `.load`); the core
+    /// puts it over the lower layers afterwards. Draw with premultiplied source-over blending:
     /// `rgb = src.rgb + dst.rgb × (1 − src.a)`, `a = src.a + dst.a × (1 − src.a)`.
     func renderToOutput(_ body: (any MTLRenderCommandEncoder) throws -> Void) rethrows
 

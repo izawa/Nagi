@@ -4,10 +4,12 @@ import NagiKit
 /// Runs the effects and composites them (SPEC 3.3, 3.5). The live overlay and nagi-render use
 /// the same renderer, so what the CLI shows is what the screen gets.
 ///
-/// Per display and frame: the effects draw, bottom layer first, into one accumulation texture
-/// (premultiplied, linear, 16-bit float). A `.backdrop` effect first gets the screen under it:
-/// the backdrop with the lower layers blended in the way WindowServer does it. The last pass
-/// multiplies everything by presence × strength.
+/// Per display and frame, bottom layer first: each effect draws into a cleared layer texture
+/// (premultiplied, linear, 16-bit float), and the layer is put onto the stack, which holds
+/// encoded premultiplied values, by the rule WindowServer uses for the desktop (D1, D40). So an
+/// effect looks the same over the lower layers as over the desktop. A `.backdrop` effect first
+/// gets the screen under it: the backdrop with the stack so far over it. The last pass turns the
+/// stack back into linear values and multiplies it by presence × strength.
 @MainActor public final class FrameRenderer {
     public static let workingFormat = MTLPixelFormat.rgba16Float
 
@@ -17,7 +19,9 @@ import NagiKit
     /// The ids of the effects this renderer runs, bottom layer first.
     public var effectIDs: [String] { effects.map(\.descriptor.id) }
     public var descriptors: [EffectDescriptor] { effects.map(\.descriptor) }
-    private let gainPipeline: any MTLRenderPipelineState
+    private let layerPipeline: any MTLRenderPipelineState
+    private let backdropPipeline: any MTLRenderPipelineState
+    private let outputPipeline: any MTLRenderPipelineState
     private let blendPipeline: any MTLRenderPipelineState
     /// Saved parameter values by effect id and key; missing keys use the declared defaults.
     public var parameters: [String: [String: ParameterValue]] = [:]
@@ -27,7 +31,10 @@ import NagiKit
         didSet { running = effects.filter { !disabledIDs.contains($0.descriptor.id) } }
     }
     private var running: [(descriptor: EffectDescriptor, instance: any Effect)]
-    private var accumulation: [UInt32: any MTLTexture] = [:]
+    /// The layers so far, encoded and premultiplied.
+    private var stack: [UInt32: any MTLTexture] = [:]
+    /// The effect being drawn, linear and premultiplied.
+    private var layer: [UInt32: any MTLTexture] = [:]
     private var backdropScratch: [UInt32: any MTLTexture] = [:]
     /// The overlay of a preview, before it is put over the background (DECISIONS D24).
     private var previewOverlay: [UInt32: any MTLTexture] = [:]
@@ -41,7 +48,9 @@ import NagiKit
             .sorted { $0.descriptor.layer < $1.descriptor.layer }
         running = effects
         let library = try device.makeDefaultLibrary(bundle: Bundle.module)
-        gainPipeline = try Self.pipeline(device, library, fragment: "gainFragment")
+        layerPipeline = try Self.pipeline(device, library, fragment: "layerFragment", sourceOver: true)
+        backdropPipeline = try Self.pipeline(device, library, fragment: "stackOverBackdropFragment")
+        outputPipeline = try Self.pipeline(device, library, fragment: "stackOutputFragment")
         blendPipeline = try Self.pipeline(device, library, fragment: "desktopBlendFragment")
     }
 
@@ -72,13 +81,9 @@ import NagiKit
     /// premultiplied linear colour, scaled by `presence × strength`.
     public func encode(_ frame: FrameState, view: DisplayView, strength: Double = 1,
                        into target: any MTLTexture, commandBuffer: any MTLCommandBuffer) throws {
-        let accumulation = try texture(&accumulation, for: view)
-        let clear = MTLRenderPassDescriptor()
-        clear.colorAttachments[0].texture = accumulation
-        clear.colorAttachments[0].loadAction = .clear
-        clear.colorAttachments[0].clearColor = MTLClearColor(red: 0, green: 0, blue: 0, alpha: 0)
-        clear.colorAttachments[0].storeAction = .store
-        commandBuffer.makeRenderCommandEncoder(descriptor: clear)?.endEncoding()
+        let stack = try texture(&stack, for: view)
+        let layer = try texture(&layer, for: view)
+        Self.clear(stack, commandBuffer: commandBuffer)
 
         let gain = Float(frame.presence * strength)
         for effect in running {
@@ -88,14 +93,17 @@ import NagiKit
                 let scratch = try texture(&backdropScratch, for: view)
                 // Full strength here: the final pass applies presence × strength once to
                 // everything, including what this effect copies from its backdrop.
-                encodeDesktopBlend(background: backdrop, overlay: accumulation, gain: 1,
-                                   into: scratch, commandBuffer: commandBuffer)
+                encodeFullscreen(backdropPipeline, textures: [backdrop, stack], gain: 1, into: scratch,
+                                 commandBuffer: commandBuffer)
                 effectView.backdrop = scratch
             }
-            let encoder = PassEncoder(commandBuffer: commandBuffer, output: accumulation)
+            Self.clear(layer, commandBuffer: commandBuffer)
+            let encoder = PassEncoder(commandBuffer: commandBuffer, output: layer)
             try effect.instance.render(frame.with(effect.descriptor, parameters), view: effectView, encoder: encoder)
+            encodeFullscreen(layerPipeline, textures: [layer], gain: 1, into: stack, load: true,
+                             commandBuffer: commandBuffer)
         }
-        encodeFullscreen(gainPipeline, textures: [accumulation], gain: gain, into: target, commandBuffer: commandBuffer)
+        encodeFullscreen(outputPipeline, textures: [stack], gain: gain, into: target, commandBuffer: commandBuffer)
     }
 
     /// Puts a premultiplied linear overlay over an encoded Display P3 background the way
@@ -122,14 +130,16 @@ import NagiKit
 
     /// Frees one display's textures (the display went away).
     public func forget(display: UInt32) {
-        accumulation[display] = nil
+        stack[display] = nil
+        layer[display] = nil
         backdropScratch[display] = nil
         previewOverlay[display] = nil
     }
 
     /// Frees per-display textures and lets the effects free theirs (while nagi is not shown).
     public func releaseResources() {
-        accumulation.removeAll()
+        stack.removeAll()
+        layer.removeAll()
         backdropScratch.removeAll()
         previewOverlay.removeAll()
         for effect in effects { effect.instance.releaseResources() }
@@ -156,11 +166,21 @@ import NagiKit
         return texture
     }
 
+    private static func clear(_ texture: any MTLTexture, commandBuffer: any MTLCommandBuffer) {
+        let pass = MTLRenderPassDescriptor()
+        pass.colorAttachments[0].texture = texture
+        pass.colorAttachments[0].loadAction = .clear
+        pass.colorAttachments[0].clearColor = MTLClearColor(red: 0, green: 0, blue: 0, alpha: 0)
+        pass.colorAttachments[0].storeAction = .store
+        commandBuffer.makeRenderCommandEncoder(descriptor: pass)?.endEncoding()
+    }
+
     private func encodeFullscreen(_ pipeline: any MTLRenderPipelineState, textures: [any MTLTexture], gain: Float,
-                                  into target: any MTLTexture, commandBuffer: any MTLCommandBuffer) {
+                                  into target: any MTLTexture, load: Bool = false,
+                                  commandBuffer: any MTLCommandBuffer) {
         let pass = MTLRenderPassDescriptor()
         pass.colorAttachments[0].texture = target
-        pass.colorAttachments[0].loadAction = .dontCare
+        pass.colorAttachments[0].loadAction = load ? .load : .dontCare
         pass.colorAttachments[0].storeAction = .store
         guard let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: pass) else { return }
         encoder.setRenderPipelineState(pipeline)
@@ -172,11 +192,12 @@ import NagiKit
     }
 
     private static func pipeline(_ device: any MTLDevice, _ library: any MTLLibrary,
-                                 fragment: String) throws -> any MTLRenderPipelineState {
+                                 fragment: String, sourceOver: Bool = false) throws -> any MTLRenderPipelineState {
         let descriptor = MTLRenderPipelineDescriptor()
         descriptor.vertexFunction = library.makeFunction(name: "fullscreenVertex")
         descriptor.fragmentFunction = library.makeFunction(name: fragment)
         descriptor.colorAttachments[0].pixelFormat = workingFormat
+        if sourceOver { descriptor.colorAttachments[0].usePremultipliedSourceOver() }
         return try device.makeRenderPipelineState(descriptor: descriptor)
     }
 }
