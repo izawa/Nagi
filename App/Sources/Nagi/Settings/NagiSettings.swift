@@ -100,9 +100,12 @@ struct NagiSettings: Codable, Equatable {
         (enabledEffects ?? Self.defaultEnabled(types)).contains(id)
     }
 
-    /// On by default: the effects that need no permission (SPEC 5: rain is for those who allow it).
+    /// On by default: the effects that need no permission (SPEC 5: rain is for those who allow it)
+    /// and carry no photosensitivity notice (SPEC 2.2: those are turned on by choice).
     static func defaultEnabled(_ types: [any Effect.Type]) -> [String] {
-        types.filter { !$0.descriptor.capabilities.contains(.backdrop) }.map { $0.descriptor.id }
+        types.map { $0.descriptor }
+            .filter { !$0.capabilities.contains(.backdrop) && $0.photosensitivityNotice == nil }
+            .map { $0.id }
     }
 }
 

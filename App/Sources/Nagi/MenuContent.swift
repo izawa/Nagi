@@ -131,7 +131,23 @@ struct EffectToggles: View {
                     Text(descriptor.displayName)
                 }
             }
+            .accessibilityHint(descriptor.photosensitivityNotice.map { Text($0) } ?? Text(verbatim: ""))
+            if let notice = descriptor.photosensitivityNotice {
+                PhotosensitivityNotice(text: notice)
+                    .accessibilityHidden(true)  // read as the switch's hint
+            }
         }
+    }
+}
+
+/// An effect's photosensitivity notice (SPEC 2.2), shown whether it is on or off.
+struct PhotosensitivityNotice: View {
+    let text: LocalizedStringResource
+    var body: some View {
+        Label { Text(text) } icon: { Image(systemName: "exclamationmark.triangle") }
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
     }
 }
 

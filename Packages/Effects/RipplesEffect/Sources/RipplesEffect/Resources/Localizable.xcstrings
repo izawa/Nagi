@@ -1,0 +1,14 @@
+{
+  "sourceLanguage" : "ja",
+  "strings" : {
+    "波紋" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Ripples" } } } },
+    "画面に張った浅い水に落ちる水滴の波紋" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Ripples from drops falling on a shallow pool over the screen" } } } },
+    "滴の多さ" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Drops" } } } },
+    "少なめ" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Fewer" } } } },
+    "ふつう" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Normal" } } } },
+    "多め" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "More" } } } },
+    "波の高さ" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Wave Height" } } } },
+    "波紋が文字の上を通ると、1 秒に 3 回を超えて点滅することがあります。光の点滅に敏感な方は、オフのままお使いください。" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Text can flash more than three times a second as ripples pass over it. If you’re sensitive to flashing light, leave Ripples off." } } } }
+  },
+  "version" : "1.0"
+}

@@ -111,7 +111,7 @@ private struct PermissionSettings: View {
                 }
             } footer: {
                 VStack(alignment: .leading, spacing: 6) {
-                    Text(String(localized: "雨と宝石は、後ろの画面を雨粒や結晶で屈折させるために、画面収録の許可を使います。取り込むのは凪が出ているあいだだけで、取り込んだ画面は Mac の GPU の中だけで使い、保存も送信もしません。", bundle: .module))
+                    Text(String(localized: "雨と宝石と波紋は、後ろの画面を雨粒や結晶や水面で屈折させるために、画面収録の許可を使います。取り込むのは凪が出ているあいだだけで、取り込んだ画面は Mac の GPU の中だけで使い、保存も送信もしません。", bundle: .module))
                     Text(String(localized: "取り込んでいるあいだは、メニューバーに紫の印が出ます。macOS が、ときどき許可を続けるか確かめることがあります。", bundle: .module))
                 }
                 .foregroundStyle(.secondary)
@@ -146,6 +146,9 @@ private struct EffectSection: View {
 
     var body: some View {
         Section {
+            if let notice = descriptor.photosensitivityNotice {
+                PhotosensitivityNotice(text: notice)
+            }
             if let preview {
                 GalleryPreview(view: preview.view)
                     .aspectRatio(16 / 9, contentMode: .fit)
@@ -163,6 +166,7 @@ private struct EffectSection: View {
         }
         .onAppear(perform: startPreview)
         .onDisappear(perform: stopPreview)
+        .onChange(of: previewAllowed) { previewAllowed ? startPreview() : stopPreview() }
         .onChange(of: store.settings.effects[descriptor.id]) {
             preview?.model.parameters = store.parameters(for: descriptor.id)
         }
@@ -223,8 +227,13 @@ private struct EffectSection: View {
         store.update { $0.effects[descriptor.id, default: [:]][spec.key] = value }
     }
 
+    /// An effect with a photosensitivity notice moves only once turned on (SPEC 2.2).
+    private var previewAllowed: Bool {
+        descriptor.photosensitivityNotice == nil || store.settings.isEnabled(descriptor.id, among: store.effects)
+    }
+
     private func startPreview() {
-        guard preview == nil, let device,
+        guard preview == nil, previewAllowed, let device,
               let type = store.effects.first(where: { $0.descriptor.id == descriptor.id }) else { return }
         let model = GalleryModel(effect: type)
         model.fixture = .sample(for: type, dark: NSApp.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua)

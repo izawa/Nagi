@@ -10,10 +10,13 @@ public struct EffectDescriptor: Sendable {
     public var capabilities: Set<Capability>
     public var parameters: [ParameterSpec]
     public var weatherHint: WeatherHint?
+    /// Set only by an effect that may flash more than the rule allows (SPEC 2.2): it starts off and
+    /// shows this beside its switch, so the notice can be read before turning it on.
+    public var photosensitivityNotice: LocalizedStringResource?
 
     public init(id: String, displayName: LocalizedStringResource, summary: LocalizedStringResource,
                 layer: EffectLayer, capabilities: Set<Capability> = [], parameters: [ParameterSpec] = [],
-                weatherHint: WeatherHint? = nil) {
+                weatherHint: WeatherHint? = nil, photosensitivityNotice: LocalizedStringResource? = nil) {
         self.id = id
         self.displayName = displayName
         self.summary = summary
@@ -21,6 +24,7 @@ public struct EffectDescriptor: Sendable {
         self.capabilities = capabilities
         self.parameters = parameters
         self.weatherHint = weatherHint
+        self.photosensitivityNotice = photosensitivityNotice
     }
 }
 

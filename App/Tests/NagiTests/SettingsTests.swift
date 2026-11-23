@@ -65,6 +65,17 @@ struct SettingsTests {
         #expect(try decode("{}").effectMode == .all)
     }
 
+    /// An effect with a photosensitivity notice starts off even without needing a permission, and
+    /// stays on once chosen (SPEC 2.2).
+    @Test func effectsWithNoticeStartOff() throws {
+        let types: [any Effect.Type] = effects + [FlashStub.self]
+        #expect(!NagiSettings().isEnabled("test.flash", among: types))
+        #expect(try decode("{}").validated(effects: types).enabledEffects == ["komorebi", "caustics", "moss"])
+        var chosen = try decode("{}")
+        chosen.setEnabled("test.flash", true, among: types)
+        #expect(chosen.validated(effects: types).enabledEffects == ["komorebi", "caustics", "moss", "test.flash"])
+    }
+
     /// A pause that has run out is cleared.
     @Test func pastPauseClears() {
         var settings = NagiSettings()
@@ -107,6 +118,16 @@ struct SettingsTests {
 private final class GlassStub: Effect {
     static let descriptor = EffectDescriptor(id: "test.glass", displayName: "Glass", summary: "",
                                              layer: .glass, capabilities: [.backdrop])
+    init(context: EffectContext) throws {}
+    func update(_ frame: FrameState) {}
+    func render(_ frame: FrameState, view: DisplayView, encoder: any EffectEncoder) throws {}
+    func releaseResources() {}
+}
+
+/// An effect that needs no permission but may flash beyond the rule.
+private final class FlashStub: Effect {
+    static let descriptor = EffectDescriptor(id: "test.flash", displayName: "Flash", summary: "",
+                                             layer: .light, photosensitivityNotice: "Flashes")
     init(context: EffectContext) throws {}
     func update(_ frame: FrameState) {}
     func render(_ frame: FrameState, view: DisplayView, encoder: any EffectEncoder) throws {}
