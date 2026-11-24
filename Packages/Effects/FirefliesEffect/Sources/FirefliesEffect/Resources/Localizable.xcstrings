@@ -1,0 +1,36 @@
+{
+  "sourceLanguage": "ja",
+  "strings": {
+    "蛍": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Fireflies"
+          }
+        }
+      }
+    },
+    "日が沈むと、画面の向こうを蛍が飛ぶ": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "After sunset, fireflies fly beyond the screen"
+          }
+        }
+      }
+    },
+    "蛍は日が沈むと現れます": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Fireflies appear after sunset"
+          }
+        }
+      }
+    }
+  },
+  "version": "1.0"
+}

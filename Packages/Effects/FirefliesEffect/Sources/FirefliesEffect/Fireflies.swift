@@ -1,0 +1,214 @@
+import CoreGraphics
+import Foundation
+import Metal
+import NagiKit
+
+/// A string from this package's catalog (Resources/Localizable.xcstrings).
+func localized(_ key: String.LocalizationValue) -> LocalizedStringResource {
+    LocalizedStringResource(key, bundle: .atURL(Bundle.module.bundleURL))
+}
+
+/// Fireflies (M7-PLAN): after sunset, yellow-green lights fly in the dark beyond the screen,
+/// come on and die away. Only the light is drawn, no insect. Far ones are small sharp points,
+/// near ones soft out-of-focus discs. One instanced quad per firefly.
+public final class Fireflies: Effect {
+    public static let descriptor = EffectDescriptor(
+        id: "fireflies",
+        displayName: localized("蛍"),
+        summary: localized("日が沈むと、画面の向こうを蛍が飛ぶ"),
+        layer: .light,
+        // The "bright" look on a light screen draws above SDR white (M7-PLAN 5, c).
+        capabilities: [.extendedRange],
+        parameters: [
+            // Tuned in the gallery and at W1 (区切り A); not translated (DECISIONS D24).
+            ParameterSpec(key: "strength", label: "強さ", kind: .slider(range: 0...1, defaultValue: 1)),
+            ParameterSpec(key: "count", label: "数", kind: .slider(range: 1...15, defaultValue: 12)),
+            ParameterSpec(key: "size", label: "大きさ", kind: .slider(range: 0.5...4, defaultValue: 3)),
+            ParameterSpec(key: "focus", label: "ピントの距離", kind: .slider(range: 0.3...4, defaultValue: 1.5)),
+            // No shorter than 3 s: a flash is lit for 2.2 s (W1).
+            ParameterSpec(key: "period", label: "明滅の周期", kind: .slider(range: 3...5, defaultValue: 4)),
+            ParameterSpec(key: "lightStyle", label: "ライトの外観", kind: .choice(options: [
+                .init(key: "glow", label: "同じ色を置く"),
+                .init(key: "shade", label: "まわりを暗く"),
+                .init(key: "bright", label: "白より明るく"),
+            ], defaultValue: "bright")),  // the author's choice at W1
+            ParameterSpec(key: "glow", label: "にじみ", kind: .slider(range: 0...1, defaultValue: 0.35)),
+            ParameterSpec(key: "shade", label: "まわりの暗さ", kind: .slider(range: 0...0.6, defaultValue: 0.3)),
+            ParameterSpec(key: "edrGain", label: "白より明るく", kind: .slider(range: 1...4, defaultValue: 2)),
+        ])
+
+    /// Strongest alpha at the core of a far and of a near light (M7-PLAN 5, 【仮】). The plan's
+    /// 0.06 … 0.14 (komorebi's) showed almost nothing on black: a light of its own needs a bright core.
+    static let farAlpha = 0.5, nearAlpha = 0.85
+    /// Encoded Display P3 green with a little yellow, and the whiter colour at a core. The first
+    /// (0.80, 1.0, 0.32) read too yellow to the author at W1.
+    static let colour = SIMD3<Float>(0.55, 1.0, 0.40)
+    static let coreColour = SIMD3<Float>(0.85, 1.0, 0.75)
+    /// The dark around a light in the "shade" look: komorebi's near-black (SPEC 4.1).
+    static let shadeColour = SIMD3<Float>(0.0, 0.006, 0.004)
+
+    /// Millimetres of blur on the screen per dioptre out of focus (|1/distance − 1/focus|): about
+    /// as much as the nearest firefly had before focus came in (W1).
+    static let blurPerDioptre = 0.48
+
+    struct Instance {
+        /// Centre (x, y) in pixels, the core's and the glow's spread (pixels).
+        var centre: SIMD4<Float>
+        /// The out-of-focus disc's radius (pixels, 0 in focus), the quad's half size, the light's
+        /// alpha now, how far the shade reaches (pixels).
+        var shape: SIMD4<Float>
+    }
+
+    struct Uniforms {
+        /// Output size in pixels, the look (0 plain, 1 shade, 2 bright), the shade's alpha.
+        var target: SIMD4<Float>
+        /// The glow's share of the core's alpha.
+        var look: SIMD4<Float>
+        /// Linear colour of the light (times the EDR gain), and of its core.
+        var colour: SIMD4<Float>
+        var core: SIMD4<Float>
+        var shade: SIMD4<Float>
+    }
+
+    /// How dark the sky is: 0 with the sun up, 1 from 6° below the horizon (M7-PLAN 4).
+    static func night(_ environment: SharedEnvironment) -> Double {
+        let degree = Double.pi / 180
+        return 1 - Firefly.smooth((environment.sun.altitude + 6 * degree) / (6 * degree))
+    }
+
+    /// Displays in one order (the engine's may change): left to right, then top to bottom.
+    static func order(_ a: CGRect, _ b: CGRect) -> Bool { (a.minX, a.minY) < (b.minX, b.minY) }
+
+    static func bounded(_ value: Double, _ range: ClosedRange<Double>, default fallback: Double) -> Double {
+        value.isFinite ? min(max(value, range.lowerBound), range.upperBound) : fallback
+    }
+
+    /// The share of the lights' alpha drawn now: night × strength, halved for Increase Contrast or
+    /// Reduce Transparency (M7-PLAN 7). Not depth: a calm that starts at 0 still has fireflies.
+    static func visibility(_ frame: FrameState) -> Double {
+        let strength = frame.number("strength", default: 1) * (frame.accessibility.reduceStrength ? 0.5 : 1)
+        return night(frame.environment) * strength
+    }
+
+    /// The share of the distance flown: half for Reduce Motion (M7-PLAN 7).
+    static func motion(_ frame: FrameState) -> Double { frame.accessibility.reduceMotion ? 0.5 : 1 }
+
+    public static func note(_ frame: FrameState) -> LocalizedStringResource? {
+        night(frame.environment) > 0 ? nil : localized("蛍は日が沈むと現れます")
+    }
+
+    public static func isSilent(_ frame: FrameState) -> Bool { !(visibility(frame) > 0) }
+
+    private let pipeline: any MTLRenderPipelineState
+    private var swarm: Swarm?
+    /// What the swarm was made for: another showing, desktop or setting starts over.
+    private var world: (seed: UInt64, displays: [CGRect], count: Int, period: Double)?
+    private var lastTime: Double?
+    private var lastDepth = 0.0
+
+    public init(context: EffectContext) throws {
+        let library = try context.device.makeDefaultLibrary(bundle: Bundle.module)
+        let descriptor = MTLRenderPipelineDescriptor()
+        descriptor.vertexFunction = library.makeFunction(name: "fireflyVertex")
+        descriptor.fragmentFunction = library.makeFunction(name: "fireflyFragment")
+        descriptor.colorAttachments[0].pixelFormat = context.pixelFormat
+        descriptor.colorAttachments[0].usePremultipliedSourceOver()
+        pipeline = try context.device.makeRenderPipelineState(descriptor: descriptor)
+    }
+
+    public func update(_ frame: FrameState) {
+        let depth = frame.depth.isFinite ? min(max(frame.depth, 0), 3600) : 0
+        let motion = Self.motion(frame)
+        let count = Int(Self.bounded(frame.number("count", default: 12), 1...15, default: 12).rounded())
+        let period = Self.bounded(frame.number("period", default: 4), 3...5, default: 4)
+        let seed = frame.seed &+ UInt64(frame.showing)
+        let elapsed = lastTime.map { frame.time - $0 } ?? -1
+        // A depth that jumps or goes back (a preview's slider), the clock set back, or a long stall:
+        // start over, as rain does.
+        let seek = abs(depth - lastDepth) > max(2 * elapsed, 2) + 1 || elapsed > 2
+            || (depth < lastDepth - 0.5 && frame.phase != .leaving)
+        if frame.displays.isEmpty {
+            swarm = nil
+        } else if let world, world.seed == seed, world.displays == frame.displays.sorted(by: Self.order), world.count == count,
+                  world.period == period, swarm != nil, elapsed >= 0, !seek {
+            // Leaving, the lights hold still where they were (render): no one is born or let go.
+            if frame.phase != .leaving { swarm?.advance(to: frame.time, depth: depth, motion: motion) }
+        } else {
+            world = (seed, frame.displays.sorted(by: Self.order), count, period)
+            swarm = Swarm(seed: seed, displays: frame.displays, count: count, period: period, depth: depth,
+                          now: frame.time, motion: motion)
+        }
+        lastTime = frame.time
+        lastDepth = depth
+    }
+
+    public func render(_ frame: FrameState, view: DisplayView, encoder: any EffectEncoder) throws {
+        let visibility = Self.visibility(frame)
+        guard visibility > 0, let swarm else { return }
+        let motion = Self.motion(frame)
+        let pixelsPerMillimetre = 1 / view.millimetresPerPixel
+        let light = frame.appearance == .light
+        let style: Float = switch (light, frame.parameters["lightStyle"]) {
+        case (true, .choice("shade")?): 1
+        case (true, .choice("glow")?): 0
+        case (true, _): 2
+        default: 0
+        }
+        // Millimetres on the screen to pixels, times the size (3: the author's choice at W1).
+        let size = Self.bounded(frame.number("size", default: 3), 0.5...4, default: 3) * pixelsPerMillimetre
+        let focus = Self.bounded(frame.number("focus", default: 1.5), Firefly.distances, default: 1.5)
+        let shade = Self.bounded(frame.number("shade", default: 0.3), 0...0.6, default: 0.3)
+        var instances: [Instance] = []
+        // Leaving, each light keeps where and how bright it was at the last frame before the input,
+        // and the core fades it (M7-PLAN 6).
+        let time = swarm.time
+        for case let firefly? in swarm.fireflies {
+            let brightness = firefly.brightness(at: time)
+            guard brightness > 0 else { continue }
+            let distance = firefly.distance(at: time)
+            let near = Firefly.nearness(distance: distance)
+            // Sizes on the screen in millimetres (M7-PLAN 5, 【仮】): the far core about half the near.
+            let core = (0.25 + 0.3 * near) * size
+            // A little sharper than first drawn (W1): the glow 0.85 times as wide.
+            let glow = 0.85 * (0.9 + 1.4 * near) * size
+            // Out of focus as an eye or a lens is: by how far the distance is from the focus, in
+            // dioptres. Near ones blur most; far ones a little.
+            let blur = Self.blurPerDioptre * abs(1 / distance - 1 / focus) * size
+            let reach = (style == 1 ? 1.8 : 1) * max(3.2 * glow, 1.4 * blur) + 2
+            let point = firefly.position(at: time, motion: motion)
+            let x = (point.x - view.frameInDesktop.minX) * view.scale
+            let y = (point.y - view.frameInDesktop.minY) * view.scale
+            guard x > -reach, y > -reach, x < Double(view.pixelSize.x) + reach, y < Double(view.pixelSize.y) + reach
+            else { continue }
+            let alpha = (Self.farAlpha + (Self.nearAlpha - Self.farAlpha) * near) * brightness * visibility
+            instances.append(Instance(centre: SIMD4(Float(x), Float(y), Float(core), Float(glow)),
+                                      shape: SIMD4(Float(blur), Float(reach), Float(alpha), Float(1.8 * glow))))
+        }
+        guard !instances.isEmpty else { return }
+        let length = MemoryLayout<Instance>.stride * instances.count  // at most 15 × 32 bytes
+        let gain = style == 2 && view.edrHeadroom > 1
+            ? Float(min(view.edrHeadroom, Self.bounded(frame.number("edrGain", default: 2), 1...4, default: 2))) : 1
+        var uniforms = Uniforms(
+            target: SIMD4(Float(encoder.outputSize.x), Float(encoder.outputSize.y), style, Float(shade)),
+            look: SIMD4(Float(Self.bounded(frame.number("glow", default: 0.35), 0...1, default: 0.35)), 0, 0, 0),
+            colour: SIMD4(Self.linear(Self.colour) * gain, 0),
+            core: SIMD4(Self.linear(Self.coreColour) * gain, 0),
+            shade: SIMD4(Self.shadeColour, 0))
+        encoder.renderToOutput { pass in
+            pass.setRenderPipelineState(pipeline)
+            pass.setVertexBytes(&instances, length: length, index: 0)
+            pass.setVertexBytes(&uniforms, length: MemoryLayout<Uniforms>.stride, index: 1)
+            pass.setFragmentBytes(&instances, length: length, index: 0)
+            pass.setFragmentBytes(&uniforms, length: MemoryLayout<Uniforms>.stride, index: 1)
+            pass.drawPrimitives(type: .triangleStrip, vertexStart: 0, vertexCount: 4, instanceCount: instances.count)
+        }
+    }
+
+
+    public func releaseResources() {}
+
+    static func linear(_ c: SIMD3<Float>) -> SIMD3<Float> {
+        func one(_ x: Float) -> Float { x <= 0.04045 ? x / 12.92 : pow((x + 0.055) / 1.055, 2.4) }
+        return SIMD3(one(c.x), one(c.y), one(c.z))
+    }
+}

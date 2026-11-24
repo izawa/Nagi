@@ -19,6 +19,7 @@ let package = Package(
         .package(path: "../Packages/Effects/RainEffect"),
         .package(path: "../Packages/Effects/MossEffect"),
         .package(path: "../Packages/Effects/CausticsEffect"),
+        .package(path: "../Packages/Effects/FirefliesEffect"),
         .package(path: "../Packages/Effects/GemsEffect"),
         .package(path: "../Packages/Effects/RipplesEffect"),
         .package(path: "../Packages/Effects/DebugEffects"),
@@ -26,7 +27,7 @@ let package = Package(
     targets: [
         // Adding an effect: one package, plus one line in EffectCatalog (SPEC 3.2).
         .target(name: "EffectCatalog", dependencies: [
-            "NagiKit", "KomorebiEffect", "RainEffect", "CausticsEffect", "GemsEffect", "RipplesEffect",
+            "NagiKit", "KomorebiEffect", "RainEffect", "CausticsEffect", "FirefliesEffect", "GemsEffect", "RipplesEffect",
             .product(name: "MossEffect", package: "MossEffect", condition: .when(traits: ["WithMoss"])),
         ]),
         .executableTarget(

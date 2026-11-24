@@ -195,6 +195,7 @@ public protocol Effect: AnyObject {
                 encoder: EffectEncoder)
     func releaseResources()                      // 凪でない間に呼ばれうる
     static func note(_ frame: FrameState) -> LocalizedStringResource?  // いま描かない理由。メニューに出す
+    static func isSilent(_ frame: FrameState) -> Bool  // いま何も見えない。ランダムモードの抽選から外す(2.3)
 }
 
 public struct EffectDescriptor {

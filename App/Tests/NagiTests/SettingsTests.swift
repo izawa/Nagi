@@ -9,9 +9,9 @@ struct SettingsTests {
     let effects = EffectCatalog.all
     /// On by default with the catalog this build has (moss only with the WithMoss trait).
     #if WithMoss
-    let quiet = ["komorebi", "caustics", "moss"]
+    let quiet = ["komorebi", "caustics", "fireflies", "moss"]
     #else
-    let quiet = ["komorebi", "caustics"]
+    let quiet = ["komorebi", "caustics", "fireflies"]
     #endif
 
     func decode(_ json: String) throws -> NagiSettings {
