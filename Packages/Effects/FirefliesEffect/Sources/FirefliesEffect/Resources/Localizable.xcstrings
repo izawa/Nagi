@@ -30,6 +30,16 @@
           }
         }
       }
+    },
+    "数": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Number"
+          }
+        }
+      }
     }
   },
   "version": "1.0"

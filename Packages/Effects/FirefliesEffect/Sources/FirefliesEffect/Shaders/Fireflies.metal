@@ -66,3 +66,21 @@ fragment float4 fireflyFragment(FireflyOut in [[stage_in]],
     }
     return light;
 }
+
+// The inner orb (W1 trial): a smaller light of the first, yellower colour, with an edge that can
+// be told, blurred as the light is, trailing behind it. Instance: centre = x, y, radius, the edge's
+// half width; shape = blur, the quad's half size, alpha now, unused. `u.colour` is the orb's colour.
+fragment float4 orbFragment(FireflyOut in [[stage_in]],
+                            constant Instance *lights [[buffer(0)]],
+                            constant Uniforms &u [[buffer(1)]]) {
+    constant Instance &l = lights[in.light];
+    float r = length(in.offset);
+    float radius = l.centre.z, blur = l.shape.x;
+    // Blurred, the edge widens by the blur and the light spreads over a larger disc.
+    float edge = l.centre.w + 0.5 * blur;
+    float disc = 1 - smoothstep(radius - edge, radius + edge, r);
+    float spread = radius * radius / (radius * radius + 0.25 * blur * blur);
+    float fade = 1 - smoothstep(0.8 * l.shape.y, l.shape.y, r);
+    float a = clamp(l.shape.z * disc * spread * fade, 0.0, 1.0);
+    return float4(u.colour.rgb * a, a);
+}

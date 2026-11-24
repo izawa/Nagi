@@ -2,15 +2,19 @@ import Foundation
 import simd
 
 /// One firefly (M7-PLAN 3): it flies on whether lit or dark, so the next light comes on further
-/// along its path. Its flight follows from its seed and the time it was born, in desktop points;
-/// its flashes from a phase the swarm advances, so the flock can fall into step (M7-PLAN 9, 1).
+/// along its path. Its course, distance and pace follow from its seed and the time it was born;
+/// the swarm moves it and advances its flash phase, so the flock can fall into step (M7-PLAN 9, 1).
 struct Firefly: Equatable {
     var seed: UInt64
     var born: Double
     /// Seconds it flies; it starts no flash after that.
     var life: Double
-    /// Where it was born, desktop points.
-    var origin: SIMD2<Double>
+    /// Where it is now, desktop points.
+    var position: SIMD2<Double>
+    /// The direction it set off in, radians (x right, y down); it wanders around it.
+    var heading: Double
+    /// Its own pace, times the speed its distance gives (0.85 … 1.15).
+    var pace: Double
     /// Its own flash period, seconds.
     var period: Double
     /// 0 … 1 through its flash cycle; a flash starts each time it passes 1.
@@ -22,17 +26,24 @@ struct Firefly: Equatable {
     var lit = false
     /// Where its distance swings around, in `distance(at:)`'s units (−∞ far … +∞ near).
     var depth: Double
-    /// Mean flight speed, desktop points per second.
-    var speed: Double
-    /// Unit vector of its slow drift.
-    var heading: SIMD2<Double>
 
     /// How far behind the glass fireflies fly, metres (M7-PLAN 3, 【仮】).
     static let distances = 0.3...4.0
+    /// Apparent speed on the screen at the far and the near end of `distances`, mm/s (M7-PLAN 3).
+    static let speeds = 5.0...16.0
 
-    /// Metres behind the glass at `time`: it drifts nearer and further over 15 … 40 seconds, and
-    /// eases into the ends of `distances` instead of stopping at them.
-    func distance(at time: Double) -> Double {
+    /// Seconds a flash takes to come up, stays, and dies away: about 2.2 s lit (the author found
+    /// 0.3 + 0.8 s too short at W1).
+    static let rise = 0.4
+    static let hold = 0.6
+    static let fall = 1.2
+    /// Seconds a flash is lit.
+    static var lit: Double { rise + hold + fall }
+
+    /// 0 at the far end of `distances` … 1 at the near end (evenly in the logarithm of the
+    /// distance) at `time`: it drifts nearer and further over 15 … 40 seconds, and eases into the
+    /// ends instead of stopping at them.
+    func nearness(at time: Double) -> Double {
         let t = max(time - born, 0)
         var swing = 0.0
         for wave in 0..<2 {
@@ -40,44 +51,44 @@ struct Firefly: Equatable {
             let phase = 2 * Double.pi * Hash.unit(seed, 40 + wave)
             swing += (wave == 0 ? 0.6 : 0.3) * (sin(omega * t + phase) - sin(phase))
         }
-        let near = log(Self.distances.lowerBound), far = log(Self.distances.upperBound)
-        return exp((near + far) / 2 + (near - far) / 2 * tanh(depth + swing))
+        return (1 + tanh(depth + swing)) / 2
     }
 
-    /// 0 at the far end of `distances` … 1 at the near end, evenly in the logarithm.
-    static func nearness(distance: Double) -> Double {
-        log(distances.upperBound / distance) / log(distances.upperBound / distances.lowerBound)
+    /// Metres behind the glass for a nearness.
+    static func distance(nearness: Double) -> Double {
+        distances.upperBound * pow(distances.lowerBound / distances.upperBound, nearness)
     }
 
-    /// Seconds a flash takes to come up, stays, and dies away: about 2.2 s lit (the author found
-    /// 0.3 + 0.8 s too short at W1).
-    static let rise = 0.4
-    static let hold = 0.6
-    static let fall = 1.2
-
-    /// Where it is at `time`: a slow drift plus a smooth wander (two waves per axis whose
-    /// frequencies do not divide, so the path does not repeat within a life). `motion` scales the
-    /// distance flown (Reduce Motion halves it, SPEC 2.2).
-    func position(at time: Double, motion: Double = 1) -> SIMD2<Double> {
+    /// Its velocity at `time`, desktop points a second. The direction wanders around its heading,
+    /// turning every 2 … 6 seconds; the speed is the apparent speed of its distance now (nearer
+    /// looks faster), times its pace and its pauses.
+    func velocity(at time: Double) -> SIMD2<Double> {
         let t = max(time - born, 0)
-        var wander = SIMD2<Double>.zero
-        for wave in 0..<4 {
-            // Turns every 2 … 6 seconds (M7-PLAN 3).
+        var angle = heading
+        for wave in 0..<3 {
             let omega = 2 * Double.pi / (4 + 8 * Hash.unit(seed, 10 + wave))
-            let phase = 2 * Double.pi * Hash.unit(seed, 20 + wave)
-            // Each wave alone moves at a third of the mean speed: with the drift, the fastest
-            // moments stay under about 1.5 times the mean.
-            let amplitude = 0.33 * speed / omega
-            let value = amplitude * (sin(omega * t + phase) - sin(phase))
-            if wave < 2 { wander.x += value } else { wander.y += value }
+            angle += 0.5 * sin(omega * t + 2 * Double.pi * Hash.unit(seed, 20 + wave))
         }
-        return origin + motion * (heading * speed * 0.55 * t + wander)
+        let near = nearness(at: time)
+        let millimetres = (Self.speeds.lowerBound + (Self.speeds.upperBound - Self.speeds.lowerBound) * near)
+            * pace * slowing(at: time)
+        return SIMD2(cos(angle), sin(angle)) * millimetres * Swarm.pointsPerMillimetre
     }
 
-    func point(at time: Double, motion: Double = 1) -> CGPoint {
-        let p = position(at: time, motion: motion)
-        return CGPoint(x: p.x, y: p.y)
+    /// 1 … 0.2: now and then (in seven of ten 10-second spans) it slows down for 1 … 2 seconds
+    /// in all, easing down and back up over half a second each (M7-PLAN 3). A spell starts within
+    /// the first 8 seconds of its span, so it ends within it.
+    func slowing(at time: Double) -> Double {
+        let t = max(time - born, 0)
+        let span = (t / 10).rounded(.down)
+        let key = 2000 + 3 * Int(span)
+        guard Hash.unit(seed, key) < 0.7 else { return 1 }
+        let start = span * 10 + 8 * Hash.unit(seed, key + 1)
+        let end = start + 1 + Hash.unit(seed, key + 2)
+        return 1 - 0.8 * Self.smooth((t - start) / 0.5) * (1 - Self.smooth((t - end + 0.5) / 0.5))
     }
+
+    var point: CGPoint { CGPoint(x: position.x, y: position.y) }
 
     /// 0 … 1: how lit it is at `time`, by the seconds since its last flash began.
     func brightness(at time: Double) -> Double {
@@ -90,9 +101,11 @@ struct Firefly: Equatable {
         return level * (1 - Self.smooth((local - Self.rise - Self.hold) / Self.fall))
     }
 
-    /// Moves its phase on by `step` seconds, ending at `now`, at `rate` cycles a second. A flash
-    /// starts the moment it passes 1, if that moment is within its life.
-    mutating func flash(step: Double, rate: Double, now: Double) {
+    /// Moves it by `step` seconds ending at `now`: along its course (times `motion`), and its
+    /// phase at `rate` cycles a second. A flash starts the moment the phase passes 1, if that
+    /// moment is within its life.
+    mutating func advance(step: Double, now: Double, rate: Double, motion: Double) {
+        position += velocity(at: now - step / 2) * step * motion
         phase += step * rate
         guard phase >= 1 else { return }
         phase -= 1
@@ -100,9 +113,6 @@ struct Firefly: Equatable {
         onset = now - phase / rate
         lit = onset < born + life
     }
-
-    /// Seconds a flash is lit.
-    static var lit: Double { rise + hold + fall }
 
     /// Its life is over and its last flash has died away.
     func isDone(at now: Double) -> Bool { now >= born + life && now - onset >= Self.lit }
@@ -114,9 +124,9 @@ struct Firefly: Equatable {
 }
 
 /// The fireflies of one showing: slots that fill one by one as the calm deepens; a firefly that
-/// has flown its life gives its slot to a new one born elsewhere a few seconds later. As the calm
-/// deepens their flashes are drawn into step, as a flock of Genji fireflies falls into step
-/// (Kuramoto coupling, M7-PLAN 3): the depth shows as order, not only as more lights.
+/// has flown its life or left the desktop gives its slot to a new one born elsewhere a few seconds
+/// later. As the calm deepens their flashes are drawn into step, as a flock of Genji fireflies
+/// falls into step (Kuramoto coupling, M7-PLAN 3): the depth shows as order, not only as more lights.
 struct Swarm {
     /// Desktop points per millimetre of flight, for every display (komorebi's desktop pitch).
     static let pointsPerMillimetre = 109 / 25.4
@@ -129,6 +139,8 @@ struct Swarm {
     static let coupling = 0.6
     /// 0 … 1: the coupling's share at `depth`, from none at 60 s to all at 300 s.
     static func pull(depth: Double) -> Double { Firefly.smooth((depth - 60) / 240) }
+    /// How far past the desktop's edge a firefly is let go: its glow is gone well before.
+    static let margin = 60.0
 
     let seed: UInt64
     /// The displays the fireflies are born over, and the rectangle around them, points.
@@ -144,7 +156,7 @@ struct Swarm {
 
     /// The slots that should be filled at `depth` and `now`, as if the calm had deepened to it
     /// (a showing that starts deep, "see it now", finds fireflies already flying).
-    init(seed: UInt64, displays: [CGRect], count: Int, period: Double, depth: Double, now: Double, motion: Double = 1) {
+    init(seed: UInt64, displays: [CGRect], count: Int, period: Double, depth: Double, now: Double) {
         self.seed = seed
         self.displays = displays.sorted { ($0.minX, $0.minY) < ($1.minX, $1.minY) }
         bounds = displays.reduce(CGRect.null) { $0.union($1) }
@@ -153,33 +165,28 @@ struct Swarm {
         nextBirth = Array(repeating: .infinity, count: count)
         births = Array(repeating: 0, count: count)
         time = now
-        // The first slot's next flash soon, so a deep start shows a light in a second or two; the
-        // others as far into step as the depth would have drawn them.
-        let first = 1 - (0.6 + 1.2 * Hash.unit(seed, 600)) / period
+        // The first slot's first flash soon, so a deep start shows a light in a second or two; the
+        // others no sooner, and spread over a period as little as the depth would have drawn them
+        // together.
+        let first = 0.6 + 1.2 * Hash.unit(seed, 600)
         let scatter = 1 - Self.pull(depth: depth)
         for slot in 0..<count where depth >= Self.threshold(slot) {
             let age = min(depth - Self.threshold(slot), 40 * Hash.unit(seed, 500 + slot))
-            // The others between the first and a period behind it: none lights before the first.
-            let phase = first * (1 - (slot == 0 ? 0 : scatter * Hash.unit(seed, 600 + slot)))
-            var firefly = make(slot: slot, born: now - age, phase: phase)
-            // Where it is now is the random point drawn, not where it was born: a deep start does
-            // not begin with fireflies already off the desktop.
-            firefly.origin -= firefly.position(at: now, motion: motion) - firefly.origin
+            var firefly = make(slot: slot, born: now - age, phase: 0)
+            let wait = first + (slot == 0 ? 0 : scatter * (firefly.period - first) * Hash.unit(seed, 600 + slot))
+            firefly.phase = max(1 - wait / firefly.period, 0)
             fireflies[slot] = firefly
         }
     }
 
-    /// How far past the desktop's edge a firefly is let go: its glow is gone well before.
-    static let margin = 60.0
-
-    /// Fills the slots `depth` has reached, and replaces fireflies that have flown their life or
-    /// left the desktop (they fly on and away, not back: M7-PLAN 3). `motion` as for
-    /// `Firefly.position`.
+    /// Moves the fireflies on to `now`, fills the slots `depth` has reached, and replaces those
+    /// that have flown their life or left the desktop (they fly on and away, not back: M7-PLAN 3).
+    /// `motion` scales the distance flown (Reduce Motion halves it, SPEC 2.2).
     mutating func advance(to now: Double, depth: Double, motion: Double = 1) {
-        stepFlashes(to: now, depth: depth)
+        step(to: now, depth: depth, motion: motion)
         let field = bounds.insetBy(dx: -Self.margin, dy: -Self.margin)
         for slot in fireflies.indices {
-            if let firefly = fireflies[slot], firefly.isDone(at: now) || !field.contains(firefly.point(at: now, motion: motion)) {
+            if let firefly = fireflies[slot], firefly.isDone(at: now) || !field.contains(firefly.point) {
                 fireflies[slot] = nil
                 // Some seconds of dark before the next one.
                 nextBirth[slot] = now + 2 + 6 * Hash.unit(seed &+ UInt64(births[slot]), 700 + slot)
@@ -204,9 +211,9 @@ struct Swarm {
         return sum / Double(flying.count)
     }
 
-    /// Advances every phase to `now` in steps of at most 1/20 s: each at its own rate, pulled
-    /// towards the flock's mean phase as hard as the depth allows.
-    private mutating func stepFlashes(to now: Double, depth: Double) {
+    /// Moves every firefly to `now` in steps of at most 1/20 s: along its course, and its phase at
+    /// its own rate, pulled towards the flock's mean phase as hard as the depth allows.
+    private mutating func step(to now: Double, depth: Double, motion: Double) {
         let pull = Self.coupling * Self.pull(depth: depth)
         var remaining = max(now - time, 0)
         while remaining > 0 {
@@ -219,7 +226,7 @@ struct Swarm {
                 // dθ/dt = ω + K · R · sin(ψ − θ), in cycles a second.
                 let angle = 2 * Double.pi * firefly.phase
                 let towards = mean.y * cos(angle) - mean.x * sin(angle)  // R · sin(ψ − θ)
-                firefly.flash(step: step, rate: 1 / firefly.period + pull * towards / (2 * .pi), now: at)
+                firefly.advance(step: step, now: at, rate: 1 / firefly.period + pull * towards / (2 * .pi), motion: motion)
                 fireflies[slot] = firefly
             }
         }
@@ -229,22 +236,18 @@ struct Swarm {
     private mutating func make(slot: Int, born: Double, phase: Double) -> Firefly {
         births[slot] += 1
         let key = seed &+ UInt64(slot) &* 0x9E37_79B9 &+ UInt64(births[slot]) &* 0x85EB_CA6B
-        // Evenly over the logarithm of the distance, a little less often at the very ends.
-        let depth = 2.4 * (Hash.unit(key, 1) - 0.5)
-        let nearness = (tanh(depth) + 1) / 2
-        // Apparent speed on the screen: 5 … 9 mm/s far, 10 … 16 mm/s near (M7-PLAN 3).
-        let millimetres = (5 + 5 * nearness) + (4 + 3 * nearness) * Hash.unit(key, 2)
         let display = displays[min(Int(Hash.unit(key, 8) * Double(displays.count)), displays.count - 1)]
-        let origin = SIMD2(display.minX + display.width * Hash.unit(key, 5), display.minY + display.height * Hash.unit(key, 6))
+        let position = SIMD2(display.minX + display.width * Hash.unit(key, 5),
+                             display.minY + display.height * Hash.unit(key, 6))
         // Towards the middle of its display, give or take 70°: one born near an edge crosses the
         // screen instead of leaving it at once.
-        let inward = SIMD2(display.midX, display.midY) - origin
-        let angle = atan2(inward.y, inward.x) + (Hash.unit(key, 3) - 0.5) * 140 * Double.pi / 180
-        return Firefly(seed: key, born: born, life: 45 + 45 * Hash.unit(key, 4),
-                       origin: origin,
+        let inward = SIMD2(display.midX, display.midY) - position
+        let heading = atan2(inward.y, inward.x) + (Hash.unit(key, 3) - 0.5) * 140 * Double.pi / 180
+        return Firefly(seed: key, born: born, life: 45 + 45 * Hash.unit(key, 4), position: position,
+                       heading: heading, pace: 0.85 + 0.3 * Hash.unit(key, 2),
                        period: period * (0.95 + 0.1 * Hash.unit(key, 7)), phase: phase,
-                       depth: depth, speed: millimetres * Self.pointsPerMillimetre,
-                       heading: SIMD2(cos(angle), sin(angle)))
+                       // Evenly over the logarithm of the distance, a little less often at the ends.
+                       depth: 2.4 * (Hash.unit(key, 1) - 0.5))
     }
 }
 

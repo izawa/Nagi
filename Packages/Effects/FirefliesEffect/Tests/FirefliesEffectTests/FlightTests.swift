@@ -32,20 +32,67 @@ struct FlightTests {
         #expect(dusk > 0 && dusk < 1)
     }
 
-    /// It flies on while dark: no jump from frame to frame, and it gets somewhere.
+    /// A desktop too big to leave, for following one firefly through its life.
+    let wide = CGRect(x: -1e6, y: -1e6, width: 2e6, height: 2e6)
+
+    /// It flies on while dark, without a jump: never faster than the near speed allows, and it
+    /// gets somewhere.
     @Test func flightIsSmooth() {
-        let swarm = Swarm(seed: 7, displays: [bounds], count: 1, period: 4, depth: 60, now: 100)
-        let firefly = try! #require(swarm.fireflies[0])
-        var last = firefly.position(at: 100)
-        var fastest = 0.0
-        for step in 1...(60 * 60) {
-            let p = firefly.position(at: 100 + Double(step) / 60)
+        var swarm = Swarm(seed: 7, displays: [wide], count: 1, period: 4, depth: 60, now: 0)
+        let start = swarm.fireflies[0]!.position
+        var last = start, fastest = 0.0
+        for step in 1...(60 * 40) {
+            swarm.advance(to: Double(step) / 60, depth: 60)
+            let p = swarm.fireflies[0]!.position
             fastest = max(fastest, simd_length(p - last) * 60)
             last = p
         }
-        // Points per second: under 1.6 times the mean speed.
-        #expect(fastest < 1.6 * firefly.speed)
-        #expect(simd_length(last - firefly.position(at: 100)) > 5 * Swarm.pointsPerMillimetre)
+        #expect(fastest <= Firefly.speeds.upperBound * 1.15 * Swarm.pointsPerMillimetre + 1e-9)
+        #expect(simd_length(last - start) > 20 * Swarm.pointsPerMillimetre)
+    }
+
+    /// The speed follows the distance it is at now (nearer looks faster), times its pace and
+    /// its pauses.
+    @Test func speedFollowsTheDistanceNow() {
+        let firefly = Firefly(seed: 1, born: 0, life: 60, position: .zero, heading: 0, pace: 0.9, period: 4, phase: 0,
+                              depth: 0)
+        for time in [3.0, 17.0, 41.0] {
+            let near = firefly.nearness(at: time)
+            let expected = (Firefly.speeds.lowerBound + (Firefly.speeds.upperBound - Firefly.speeds.lowerBound) * near)
+                * 0.9 * firefly.slowing(at: time) * Swarm.pointsPerMillimetre
+            #expect(abs(simd_length(firefly.velocity(at: time)) - expected) < 1e-9)
+        }
+        let nearness = stride(from: 0.0, to: 60, by: 1).map { firefly.nearness(at: $0) }
+        #expect(nearness.max()! - nearness.min()! > 0.1)
+    }
+
+    /// Reduce Motion: half the distance flown, the flashes as they were.
+    @Test func reduceMotionHalvesTheFlight() {
+        var full = Swarm(seed: 3, displays: [wide], count: 1, period: 4, depth: 60, now: 0), half = full
+        let start = full.fireflies[0]!.position
+        for step in 1...200 {
+            full.advance(to: Double(step) / 20, depth: 60)
+            half.advance(to: Double(step) / 20, depth: 60, motion: 0.5)
+        }
+        let ratio = simd_length(half.fireflies[0]!.position - start) / simd_length(full.fireflies[0]!.position - start)
+        #expect(abs(ratio - 0.5) < 1e-9)
+        #expect(full.fireflies[0]!.phase == half.fireflies[0]!.phase)
+    }
+
+    /// Now and then it slows to a fifth for a second or two, easing in and out.
+    @Test func itSlowsNowAndThen() {
+        let firefly = Firefly(seed: 4, born: 0, life: 90, position: .zero, heading: 0, pace: 1, period: 4, phase: 0,
+                              depth: 0)
+        let samples = stride(from: 0.0, to: 90, by: 0.05).map { firefly.slowing(at: $0) }
+        let slowSpells = zip(samples, samples.dropFirst()).filter { $0 >= 0.25 && $1 < 0.25 }.count
+        #expect(slowSpells >= 4 && slowSpells <= 9)
+        // Each spell, from leaving full speed to regaining it, lasts 1 … 2 s.
+        var spell = 0.0
+        for value in samples {
+            if value < 1 { spell += 0.05 } else if spell > 0 { #expect(spell > 0.9 && spell < 2.05); spell = 0 }
+        }
+        #expect(samples.min()! >= 0.2 - 1e-9)
+        #expect(zip(samples, samples.dropFirst()).allSatisfy { abs($1 - $0) < 0.25 })
     }
 
     /// One flash per period, each up and down well within it: no pixel flashes more than once in
@@ -73,7 +120,7 @@ struct FlightTests {
     /// minute of full pull they flash together. No pull before 60 s of calm.
     @Test func flashesFallIntoStep() {
         #expect(Swarm.pull(depth: 60) == 0 && Swarm.pull(depth: 300) == 1)
-        var swarm = Swarm(seed: 13, displays: [CGRect(x: -1e6, y: -1e6, width: 2e6, height: 2e6)], count: 10,
+        var swarm = Swarm(seed: 13, displays: [wide], count: 10,
                           period: 4, depth: 60, now: 0)
         swarm.advance(to: 0.05, depth: 400)
         let before = swarm.order
@@ -96,13 +143,13 @@ struct FlightTests {
         #expect(deep.fireflies.allSatisfy { $0 != nil })
         // The first slot lights first.
         let waits = deep.fireflies.map { (1 - $0!.phase) * $0!.period }
-        #expect(waits[0] < 2 && waits.dropFirst().allSatisfy { $0 >= waits[0] * 0.9 })
-        for firefly in deep.fireflies { #expect(bounds.contains(firefly!.point(at: 500))) }
+        #expect(waits[0] < 2 && waits.dropFirst().allSatisfy { $0 >= waits[0] - 1e-9 })
+        for firefly in deep.fireflies { #expect(bounds.contains(firefly!.point)) }
     }
 
     /// A firefly that has flown its life gives its slot to a new one after some dark.
     @Test func aSlotIsRefilled() {
-        var swarm = Swarm(seed: 9, displays: [CGRect(x: -1e6, y: -1e6, width: 2e6, height: 2e6)], count: 1,
+        var swarm = Swarm(seed: 9, displays: [wide], count: 1,
                           period: 4, depth: 60, now: 0)
         let first = try! #require(swarm.fireflies[0])
         var now = 0.0
@@ -114,17 +161,16 @@ struct FlightTests {
 
     /// One that has flown off the desktop gives its slot up at once, not at the end of its life.
     @Test func aFireflyThatLeavesIsReplaced() {
-        var swarm = Swarm(seed: 9, displays: [CGRect(x: 0, y: 0, width: 200, height: 200)], count: 1, period: 4,
-                          depth: 60, now: 0)
-        let first = try! #require(swarm.fireflies[0])
-        // Find when it is past the edge (a 200-point desktop is crossed in well under its life).
-        let out = stride(from: 0.0, to: first.life, by: 0.5).first {
-            let p = first.position(at: $0)
-            return !CGRect(x: -Swarm.margin, y: -Swarm.margin, width: 200 + 2 * Swarm.margin,
-                           height: 200 + 2 * Swarm.margin).contains(CGPoint(x: p.x, y: p.y))
+        let small = CGRect(x: 0, y: 0, width: 200, height: 200)
+        let field = small.insetBy(dx: -Swarm.margin, dy: -Swarm.margin)
+        // Born at 30 s of calm: newly born, its life (45 s or more) is far from over.
+        var swarm = Swarm(seed: 9, displays: [small], count: 1, period: 4, depth: 30, now: 0)
+        var now = 0.0
+        while let firefly = swarm.fireflies[0], field.contains(firefly.point), now < 30 {
+            now += 0.05
+            swarm.advance(to: now, depth: 30)
         }
-        let time = try! #require(out)
-        swarm.advance(to: time, depth: 600)
+        #expect(now < 30)
         #expect(swarm.fireflies[0] == nil)
     }
 
@@ -132,8 +178,9 @@ struct FlightTests {
     /// corner may turn along the edge and leave).
     @Test func bornHeadingIn() {
         let left = (UInt64(1)...200).filter { seed in
-            let swarm = Swarm(seed: seed, displays: [bounds], count: 1, period: 4, depth: 60, now: 0)
-            return !bounds.contains(swarm.fireflies[0]!.point(at: 4))
+            var swarm = Swarm(seed: seed, displays: [bounds], count: 1, period: 4, depth: 30, now: 0)
+            for step in 1...80 { swarm.advance(to: Double(step) / 20, depth: 30) }
+            return swarm.fireflies[0].map { !bounds.contains($0.point) } ?? true
         }
         #expect(left.count <= 4)
     }
@@ -142,7 +189,7 @@ struct FlightTests {
     @Test func distanceSwingsSmoothly() {
         let swarm = Swarm(seed: 21, displays: [bounds], count: 1, period: 4, depth: 60, now: 0)
         let firefly = try! #require(swarm.fireflies[0])
-        let samples = stride(from: 0.0, through: 60, by: 1.0 / 30).map { firefly.distance(at: $0) }
+        let samples = stride(from: 0.0, through: 60, by: 1.0 / 30).map { Firefly.distance(nearness: firefly.nearness(at: $0)) }
         #expect(samples.allSatisfy { Firefly.distances.contains($0) })
         #expect(samples.max()! / samples.min()! > 1.3)
         #expect(zip(samples, samples.dropFirst()).allSatisfy { abs(log($1 / $0)) < 0.02 })

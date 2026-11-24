@@ -22,7 +22,9 @@ public final class Fireflies: Effect {
         parameters: [
             // Tuned in the gallery and at W1 (区切り A); not translated (DECISIONS D24).
             ParameterSpec(key: "strength", label: "強さ", kind: .slider(range: 0...1, defaultValue: 1)),
-            ParameterSpec(key: "count", label: "数", kind: .slider(range: 1...15, defaultValue: 12)),
+            // How many fly once the calm is deep; the user sets it in Settings (the author asked, W1).
+            ParameterSpec(key: "count", label: localized("数"), kind: .slider(range: 1...15, defaultValue: 12),
+                          user: .slider(1...15)),
             ParameterSpec(key: "size", label: "大きさ", kind: .slider(range: 0.5...4, defaultValue: 3)),
             ParameterSpec(key: "focus", label: "ピントの距離", kind: .slider(range: 0.3...4, defaultValue: 1.5)),
             // No shorter than 3 s: a flash is lit for 2.2 s (W1).
@@ -35,6 +37,12 @@ public final class Fireflies: Effect {
             ParameterSpec(key: "glow", label: "にじみ", kind: .slider(range: 0...1, defaultValue: 0.35)),
             ParameterSpec(key: "shade", label: "まわりの暗さ", kind: .slider(range: 0...0.6, defaultValue: 0.3)),
             ParameterSpec(key: "edrGain", label: "白より明るく", kind: .slider(range: 1...4, defaultValue: 2)),
+            // The inner orb (W1 trial): its alpha against the light's, its radius against the
+            // light's seen radius, and how many seconds of flight it is offset by: negative ahead,
+            // positive behind (W1: at −0.12 the author saw it lead; it should trail).
+            ParameterSpec(key: "orb", label: "中の球", kind: .slider(range: 0...1, defaultValue: 0.8)),
+            ParameterSpec(key: "orbSize", label: "中の球の大きさ", kind: .slider(range: 0.1...1, defaultValue: 0.25)),
+            ParameterSpec(key: "orbLag", label: "中の球の遅れ", kind: .slider(range: -0.4...0.4, defaultValue: 0.12)),
         ])
 
     /// Strongest alpha at the core of a far and of a near light (M7-PLAN 5, 【仮】). The plan's
@@ -44,6 +52,9 @@ public final class Fireflies: Effect {
     /// (0.80, 1.0, 0.32) read too yellow to the author at W1.
     static let colour = SIMD3<Float>(0.55, 1.0, 0.40)
     static let coreColour = SIMD3<Float>(0.85, 1.0, 0.75)
+    /// The inner orb's colour: yellower than the first colour (0.80, 1.0, 0.32), which read too
+    /// yellow for the whole light (W1).
+    static let orbColour = SIMD3<Float>(1.0, 0.95, 0.25)
     /// The dark around a light in the "shade" look: komorebi's near-black (SPEC 4.1).
     static let shadeColour = SIMD3<Float>(0.0, 0.006, 0.004)
 
@@ -100,6 +111,7 @@ public final class Fireflies: Effect {
     public static func isSilent(_ frame: FrameState) -> Bool { !(visibility(frame) > 0) }
 
     private let pipeline: any MTLRenderPipelineState
+    private let orbPipeline: any MTLRenderPipelineState
     private var swarm: Swarm?
     /// What the swarm was made for: another showing, desktop or setting starts over.
     private var world: (seed: UInt64, displays: [CGRect], count: Int, period: Double)?
@@ -114,6 +126,8 @@ public final class Fireflies: Effect {
         descriptor.colorAttachments[0].pixelFormat = context.pixelFormat
         descriptor.colorAttachments[0].usePremultipliedSourceOver()
         pipeline = try context.device.makeRenderPipelineState(descriptor: descriptor)
+        descriptor.fragmentFunction = library.makeFunction(name: "orbFragment")
+        orbPipeline = try context.device.makeRenderPipelineState(descriptor: descriptor)
     }
 
     public func update(_ frame: FrameState) {
@@ -129,14 +143,16 @@ public final class Fireflies: Effect {
             || (depth < lastDepth - 0.5 && frame.phase != .leaving)
         if frame.displays.isEmpty {
             swarm = nil
+        } else if frame.phase == .leaving, swarm != nil {
+            // Leaving, the lights hold still where they were (render): nothing moves, is born, let
+            // go or made anew until the next showing.
         } else if let world, world.seed == seed, world.displays == frame.displays.sorted(by: Self.order), world.count == count,
                   world.period == period, swarm != nil, elapsed >= 0, !seek {
-            // Leaving, the lights hold still where they were (render): no one is born or let go.
-            if frame.phase != .leaving { swarm?.advance(to: frame.time, depth: depth, motion: motion) }
+            swarm?.advance(to: frame.time, depth: depth, motion: motion)
         } else {
             world = (seed, frame.displays.sorted(by: Self.order), count, period)
             swarm = Swarm(seed: seed, displays: frame.displays, count: count, period: period, depth: depth,
-                          now: frame.time, motion: motion)
+                          now: frame.time)
         }
         lastTime = frame.time
         lastDepth = depth
@@ -145,7 +161,6 @@ public final class Fireflies: Effect {
     public func render(_ frame: FrameState, view: DisplayView, encoder: any EffectEncoder) throws {
         let visibility = Self.visibility(frame)
         guard visibility > 0, let swarm else { return }
-        let motion = Self.motion(frame)
         let pixelsPerMillimetre = 1 / view.millimetresPerPixel
         let light = frame.appearance == .light
         let style: Float = switch (light, frame.parameters["lightStyle"]) {
@@ -158,15 +173,18 @@ public final class Fireflies: Effect {
         let size = Self.bounded(frame.number("size", default: 3), 0.5...4, default: 3) * pixelsPerMillimetre
         let focus = Self.bounded(frame.number("focus", default: 1.5), Firefly.distances, default: 1.5)
         let shade = Self.bounded(frame.number("shade", default: 0.3), 0...0.6, default: 0.3)
-        var instances: [Instance] = []
+        let orb = Self.bounded(frame.number("orb", default: 0.8), 0...1, default: 0.8)
+        let orbSize = Self.bounded(frame.number("orbSize", default: 0.25), 0.1...1, default: 0.25)
+        let orbLag = Self.bounded(frame.number("orbLag", default: 0.12), -0.4...0.4, default: 0.12) * Self.motion(frame)
+        var instances: [Instance] = [], orbs: [Instance] = []
         // Leaving, each light keeps where and how bright it was at the last frame before the input,
         // and the core fades it (M7-PLAN 6).
         let time = swarm.time
         for case let firefly? in swarm.fireflies {
             let brightness = firefly.brightness(at: time)
             guard brightness > 0 else { continue }
-            let distance = firefly.distance(at: time)
-            let near = Firefly.nearness(distance: distance)
+            let near = firefly.nearness(at: time)
+            let distance = Firefly.distance(nearness: near)
             // Sizes on the screen in millimetres (M7-PLAN 5, 【仮】): the far core about half the near.
             let core = (0.25 + 0.3 * near) * size
             // A little sharper than first drawn (W1): the glow 0.85 times as wide.
@@ -175,7 +193,7 @@ public final class Fireflies: Effect {
             // dioptres. Near ones blur most; far ones a little.
             let blur = Self.blurPerDioptre * abs(1 / distance - 1 / focus) * size
             let reach = (style == 1 ? 1.8 : 1) * max(3.2 * glow, 1.4 * blur) + 2
-            let point = firefly.position(at: time, motion: motion)
+            let point = firefly.position
             let x = (point.x - view.frameInDesktop.minX) * view.scale
             let y = (point.y - view.frameInDesktop.minY) * view.scale
             guard x > -reach, y > -reach, x < Double(view.pixelSize.x) + reach, y < Double(view.pixelSize.y) + reach
@@ -183,6 +201,18 @@ public final class Fireflies: Effect {
             let alpha = (Self.farAlpha + (Self.nearAlpha - Self.farAlpha) * near) * brightness * visibility
             instances.append(Instance(centre: SIMD4(Float(x), Float(y), Float(core), Float(glow)),
                                       shape: SIMD4(Float(blur), Float(reach), Float(alpha), Float(1.8 * glow))))
+            if orb > 0 {
+                // A share (orbSize) of the bright part's radius: two core spreads in focus, the disc out
+                // of it; 0.25 looks half the green (W1). Its blur is scaled with it, so it stays inside the green (W1: at the
+                // light's own blur it spread over the whole light). It is offset by orbLag
+                // seconds of flight, so further when it flies fast.
+                let radius = orbSize * max(2 * core, blur)
+                let orbBlur = orbSize * blur
+                let lag = firefly.velocity(at: time) * orbLag * view.scale
+                let edge = 0.15 * radius + 0.5
+                orbs.append(Instance(centre: SIMD4(Float(x - lag.x), Float(y - lag.y), Float(radius), Float(edge)),
+                                     shape: SIMD4(Float(orbBlur), Float(radius + 2 * edge + orbBlur + 2), Float(alpha * orb), 0)))
+            }
         }
         guard !instances.isEmpty else { return }
         let length = MemoryLayout<Instance>.stride * instances.count  // at most 15 × 32 bytes
@@ -201,6 +231,15 @@ public final class Fireflies: Effect {
             pass.setFragmentBytes(&instances, length: length, index: 0)
             pass.setFragmentBytes(&uniforms, length: MemoryLayout<Uniforms>.stride, index: 1)
             pass.drawPrimitives(type: .triangleStrip, vertexStart: 0, vertexCount: 4, instanceCount: instances.count)
+            guard !orbs.isEmpty else { return }
+            var orbUniforms = uniforms
+            orbUniforms.colour = SIMD4(Self.linear(Self.orbColour) * gain, 0)
+            pass.setRenderPipelineState(self.orbPipeline)
+            pass.setVertexBytes(&orbs, length: MemoryLayout<Instance>.stride * orbs.count, index: 0)
+            pass.setVertexBytes(&orbUniforms, length: MemoryLayout<Uniforms>.stride, index: 1)
+            pass.setFragmentBytes(&orbs, length: MemoryLayout<Instance>.stride * orbs.count, index: 0)
+            pass.setFragmentBytes(&orbUniforms, length: MemoryLayout<Uniforms>.stride, index: 1)
+            pass.drawPrimitives(type: .triangleStrip, vertexStart: 0, vertexCount: 4, instanceCount: orbs.count)
         }
     }
 
