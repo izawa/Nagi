@@ -24,6 +24,11 @@ public protocol Effect: AnyObject {
     /// Nil when it shows as usual.
     static func note(_ frame: FrameState) -> LocalizedStringResource?
 
+    /// True when the effect shows nothing at `frame` (komorebi on a moonless night, or with its
+    /// strength at 0). Random mode leaves it out of the draw (SPEC 2.3). An effect that shows
+    /// faintly is not silent, even if it has a note.
+    static func isSilent(_ frame: FrameState) -> Bool
+
     /// How hard this effect makes it rain at `frame`, 0 … 1 (its own parameters and depth). The
     /// core shares the largest as `SharedEnvironment.precipitation`, so other effects can get
     /// wet without knowing this one (DECISIONS D32). 0 for effects that bring no rain.
@@ -32,6 +37,7 @@ public protocol Effect: AnyObject {
 
 extension Effect {
     public static func note(_ frame: FrameState) -> LocalizedStringResource? { nil }
+    public static func isSilent(_ frame: FrameState) -> Bool { false }
     public static func precipitation(_ frame: FrameState) -> Double { 0 }
 }
 

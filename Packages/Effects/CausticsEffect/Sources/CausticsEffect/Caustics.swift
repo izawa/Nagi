@@ -154,11 +154,22 @@ public final class Caustics: Effect {
     public static func note(_ frame: FrameState) -> LocalizedStringResource? {
         switch lightSource(frame) {
         case let light? where !light.isMoon: nil
-        case let light? where light.weight * peak(frame, isMoon: true) >= 0.02:
+        case _? where !isSilent(frame):
             localized("日が沈んでいます。水中の光は月明かりで薄く現れます")
         default: frame.environment.sun.altitude > 0
             ? localized("日が低いので、水中の光は現れません") : localized("日が沈んでいるので、水中の光は現れません")
         }
+    }
+
+    /// No light, moonlight too faint to see, or nothing drawn (`render`'s rule).
+    public static func isSilent(_ frame: FrameState) -> Bool {
+        guard let light = lightSource(frame) else { return true }
+        let alpha = peak(frame, isMoon: light.isMoon) * strength(frame)
+        return light.isMoon ? !(light.weight * alpha >= 0.02) : !(alpha > 0)
+    }
+
+    static func strength(_ frame: FrameState) -> Double {
+        frame.number("strength", default: 1) * (frame.accessibility.reduceStrength ? 0.6 : 1)
     }
 
     /// The overlay's strongest alpha: the moon has its own, the sun one per appearance.
@@ -232,7 +243,7 @@ public final class Caustics: Effect {
 
     public func render(_ frame: FrameState, view: DisplayView, encoder: any EffectEncoder) throws {
         guard let light = Self.lightSource(frame) else { return }
-        let strength = frame.number("strength", default: 1) * (frame.accessibility.reduceStrength ? 0.6 : 1)
+        let strength = Self.strength(frame)
         let dark = frame.appearance == .dark
         let peak = Self.peak(frame, isMoon: light.isMoon) * strength
         guard peak > 0 else { return }

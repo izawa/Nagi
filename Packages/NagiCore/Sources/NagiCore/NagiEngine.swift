@@ -235,12 +235,19 @@ import QuartzCore
     /// What the effects say about now (Effect.note): after sunset, komorebi shows nothing. The
     /// effects of the showing, or while hidden those that would run.
     public func notes() -> [LocalizedStringResource] {
-        let date = pinnedDate ?? Date()
-        let frame = FrameState(time: Self.now, deltaTime: 0, date: date, phase: .calm, presence: 1, depth: 0,
-                               appearance: Self.appearance, seed: 1, environment: environment(at: date))
+        let frame = noteFrame()
         let ids = overlays.isShown ? running
-            : selection.upcoming(order: renderer.effectIDs, unavailable: unavailableEffects, now: Self.now)
+            : selection.upcoming(order: renderer.effectIDs, unavailable: unavailableEffects,
+                                 silent: renderer.silentIDs(frame), now: Self.now)
         return renderer.notes(frame, of: Set(ids))
+    }
+
+    /// The frame the effects' notes are asked about: now, at the start of a calm.
+    private func noteFrame() -> FrameState {
+        let date = pinnedDate ?? Date()
+        return FrameState(time: Self.now, deltaTime: 0, date: date, phase: .calm, presence: 1, depth: 0,
+                          appearance: Self.appearance, accessibility: Self.accessibility, seed: 1,
+                          environment: environment(at: date))
     }
 
     private func environment(at date: Date) -> SharedEnvironment {
@@ -314,8 +321,8 @@ import QuartzCore
 
     /// Decides the effects of the showing that starts now, and what follows from them.
     private func chooseEffects(at now: Double) {
-        running = selection.resolve(order: renderer.effectIDs, unavailable: unavailableEffects, now: now,
-                                    using: &random)
+        running = selection.resolve(order: renderer.effectIDs, unavailable: unavailableEffects,
+                                    silent: renderer.silentIDs(noteFrame()), now: now, using: &random)
         showings += 1
         applyRunning()
     }

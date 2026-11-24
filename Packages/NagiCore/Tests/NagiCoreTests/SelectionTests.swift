@@ -46,4 +46,30 @@ struct SelectionTests {
         selection.enabled = []
         #expect(selection.resolve(order: order, unavailable: [], now: 180, using: &first).isEmpty)
     }
+
+    /// M7-PLAN 9 (question 4): by day, fireflies draw nothing; random mode draws another effect.
+    @Test func randomLeavesOutSilentEffects() {
+        var selection = EffectSelection()
+        selection.mode = .random
+        selection.enabled = ["komorebi", "rain"]
+        var first = Pick(value: 0), last = Pick(value: .max)
+        #expect(selection.resolve(order: order, unavailable: [], silent: ["komorebi"], now: 0, using: &first) == ["rain"])
+        #expect(selection.upcoming(order: order, unavailable: [], silent: ["rain"], now: 60) == ["komorebi"])
+        // A kept draw that has fallen silent is drawn again, within the 30 minutes.
+        #expect(selection.resolve(order: order, unavailable: [], silent: ["rain"], now: 60, using: &last) == ["komorebi"])
+        // When every eligible effect is silent, it draws as before (and keeps the draw).
+        #expect(selection.resolve(order: order, unavailable: [], silent: ["komorebi", "rain"], now: 120,
+                                  using: &last) == ["komorebi"])
+        #expect(selection.upcoming(order: order, unavailable: [], silent: ["komorebi", "rain"], now: 180)
+                == ["komorebi"])
+    }
+
+    @Test func allIgnoresSilentEffects() {
+        var selection = EffectSelection()
+        selection.enabled = ["komorebi", "rain"]
+        var random = Pick(value: 0)
+        #expect(selection.resolve(order: order, unavailable: [], silent: ["komorebi"], now: 0, using: &random)
+                == ["komorebi", "rain"])
+        #expect(selection.upcoming(order: order, unavailable: [], silent: ["komorebi"], now: 0) == ["komorebi", "rain"])
+    }
 }

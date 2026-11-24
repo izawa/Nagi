@@ -26,4 +26,24 @@ struct NoteTests {
         // A full moon high in a dark sky: faint moonlight.
         #expect(Komorebi.note(frame(sun: -0.3, moon: 0.8))?.key == "日が沈んでいます。木漏れ日は月明かりで薄く現れます")
     }
+
+    /// Silent (left out of random mode's draw) only when nothing shows; faint moonlight draws.
+    @Test func silence() {
+        #expect(!Komorebi.isSilent(frame(sun: 0.8)))
+        #expect(Komorebi.isSilent(frame(sun: 0.03)))
+        #expect(Komorebi.isSilent(frame(sun: -0.3)))
+        #expect(Komorebi.isSilent(frame(sun: -0.3, moon: 0.8, moonlight: false)))
+        #expect(!Komorebi.isSilent(frame(sun: -0.3, moon: 0.8)))
+        var zero = frame(sun: 0.8)
+        zero.parameters["strength"] = .number(0)
+        #expect(Komorebi.isSilent(zero))
+        #expect(Komorebi.note(zero) == nil)
+        var unknown = frame(sun: 0.8)
+        unknown.parameters["strength"] = .number(.nan)
+        #expect(Komorebi.isSilent(unknown))
+        // A visible moon that reduced strength makes too faint to see.
+        var reduced = frame(sun: -0.3, moon: 0.8)
+        reduced.parameters["strength"] = .number(0.1)
+        #expect(Komorebi.isSilent(reduced))
+    }
 }

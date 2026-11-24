@@ -65,6 +65,12 @@ import NagiKit
             .compactMap { type(of: $0.instance).note(frame.with($0.descriptor, parameters)) }
     }
 
+    /// The effects that would draw nothing in `frame` (Effect.isSilent), with their parameters.
+    public func silentIDs(_ frame: FrameState) -> Set<String> {
+        Set(effects.filter { type(of: $0.instance).isSilent(frame.with($0.descriptor, parameters)) }
+            .map(\.descriptor.id))
+    }
+
     /// Fills in what the running effects share (the rain they make), advances them, and returns
     /// the frame to draw with: `encode` must get this one.
     public func update(_ frame: FrameState) -> FrameState {

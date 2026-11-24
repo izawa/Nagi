@@ -117,10 +117,9 @@ public final class Komorebi: Effect {
         let sun = light.position
         // Clouds do not fade the effect: they melt it towards its mean (the composite, DECISIONS D20).
         let clearSky = light.weight
-        let strength = frame.number("strength", default: 1) * (frame.accessibility.reduceStrength ? 0.6 : 1)
+        let strength = Self.strength(frame)
         let dark = frame.appearance == .dark
-        let peak = light.isMoon ? Self.clamped(frame.number("moonAlpha", default: 0.15), 0...0.2, default: 0.15)
-            : frame.number(dark ? "darkAlpha" : "lightAlpha", default: 0.2)
+        let peak = Self.peak(frame, isMoon: light.isMoon)
         guard clearSky * strength * peak > 0 else { return }
 
         // Display origins use one desktop-wide scale so neighbouring displays meet in the canopy;
@@ -389,11 +388,28 @@ public final class Komorebi: Effect {
     public static func note(_ frame: FrameState) -> LocalizedStringResource? {
         switch lightSource(frame) {
         case let light? where !light.isMoon: nil
-        case let light? where light.weight * frame.number("moonAlpha", default: 0.15) >= 0.02:
+        case _? where !isSilent(frame):
             localized("日が沈んでいます。木漏れ日は月明かりで薄く現れます")
         default: frame.environment.sun.altitude > 0
             ? localized("日が低いので、木漏れ日は現れません") : localized("日が沈んでいるので、木漏れ日は現れません")
         }
+    }
+
+    /// No light, moonlight too faint to see, or nothing drawn (`render`'s rule).
+    public static func isSilent(_ frame: FrameState) -> Bool {
+        guard let light = lightSource(frame) else { return true }
+        let alpha = light.weight * strength(frame) * peak(frame, isMoon: light.isMoon)
+        return light.isMoon ? !(alpha >= 0.02) : !(alpha > 0)
+    }
+
+    static func strength(_ frame: FrameState) -> Double {
+        frame.number("strength", default: 1) * (frame.accessibility.reduceStrength ? 0.6 : 1)
+    }
+
+    /// The overlay's strongest alpha: the moon has its own, the sun one per appearance.
+    static func peak(_ frame: FrameState, isMoon: Bool) -> Double {
+        if isMoon { return clamped(frame.number("moonAlpha", default: 0.15), 0...0.2, default: 0.15) }
+        return frame.number(frame.appearance == .dark ? "darkAlpha" : "lightAlpha", default: 0.2)
     }
 
     /// What lights the canopy: the sun by day; at night, if moonlight is on, the moon (SkyLight).

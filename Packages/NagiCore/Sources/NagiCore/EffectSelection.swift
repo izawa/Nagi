@@ -23,26 +23,38 @@ public struct EffectSelection: Sendable {
     }
 
     /// What the next showing would run, without drawing: random mode's kept draw if it can still
-    /// run, else every eligible effect (any of which it may draw).
-    public func upcoming(order: [String], unavailable: Set<String>, now: Double) -> [String] {
+    /// run, else every eligible effect (any of which it may draw). `silent`: as in `resolve`.
+    public func upcoming(order: [String], unavailable: Set<String>, silent: Set<String> = [],
+                         now: Double) -> [String] {
         let eligible = eligible(in: order, unavailable: unavailable)
-        return kept(eligible, now: now).map { [$0] } ?? eligible
+        guard mode == .random else { return eligible }
+        let candidates = Self.candidates(eligible, silent: silent)
+        return kept(candidates, now: now).map { [$0] } ?? candidates
     }
 
     /// The effects to run in a showing that starts at `now`. Empty when none can run.
-    public mutating func resolve(order: [String], unavailable: Set<String>, now: Double,
-                                 using random: inout some RandomNumberGenerator) -> [String] {
+    /// `silent`: effects that would draw nothing now (Effect.note: komorebi on a moonless night).
+    /// Random mode leaves them out of the draw, and draws again if its kept effect is one, so a
+    /// showing is not empty for 30 minutes; when every eligible effect is silent, it draws as before.
+    public mutating func resolve(order: [String], unavailable: Set<String>, silent: Set<String> = [],
+                                 now: Double, using random: inout some RandomNumberGenerator) -> [String] {
         let eligible = eligible(in: order, unavailable: unavailable)
         guard mode == .random else { return eligible }
-        if let id = kept(eligible, now: now) { return [id] }
-        guard let id = eligible.randomElement(using: &random) else { return [] }
+        let candidates = Self.candidates(eligible, silent: silent)
+        if let id = kept(candidates, now: now) { return [id] }
+        guard let id = candidates.randomElement(using: &random) else { return [] }
         draw = (id, now)
         return [id]
     }
 
-    /// Random mode's draw, while it is under 30 minutes old and can still run.
-    private func kept(_ eligible: [String], now: Double) -> String? {
-        guard mode == .random, let draw, eligible.contains(draw.id), now - draw.at < Self.keep else { return nil }
+    private static func candidates(_ eligible: [String], silent: Set<String>) -> [String] {
+        let drawing = eligible.filter { !silent.contains($0) }
+        return drawing.isEmpty ? eligible : drawing
+    }
+
+    /// Random mode's draw, while it is under 30 minutes old and is still a candidate.
+    private func kept(_ candidates: [String], now: Double) -> String? {
+        guard let draw, candidates.contains(draw.id), now - draw.at < Self.keep else { return nil }
         return draw.id
     }
 }
