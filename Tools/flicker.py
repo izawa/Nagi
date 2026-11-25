@@ -31,6 +31,19 @@ WEIGHTS = np.array([0.2290, 0.6917, 0.0793], dtype=np.float32)
 
 
 def luminance(path, step, size):
+    if path.suffix == ".npy":
+        # nagi-render --output *.npy: encoded Display P3, unclipped, so EDR above SDR white counts.
+        rgb = np.load(path, mmap_mode="r")
+        if not np.issubdtype(rgb.dtype, np.floating):
+            raise ValueError(f"{path} holds {rgb.dtype}; nagi-render writes floats relative to SDR white")
+        if rgb.ndim != 3 or (rgb.shape[1], rgb.shape[0]) != size or rgb.shape[2] != 3:
+            raise ValueError(f"{path} has shape {rgb.shape}, expected {size[1]} x {size[0]} x 3")
+        rgb = np.asarray(rgb[::step, ::step], dtype=np.float32)
+        if not np.all(np.isfinite(rgb)):
+            raise ValueError(f"{path} has values that are not finite")
+        a = np.abs(rgb)
+        linear = np.sign(rgb) * np.where(a <= 0.04045, a / 12.92, ((a + 0.055) / 1.055) ** 2.4)
+        return linear @ WEIGHTS
     with Image.open(path) as image:
         if image.size != size:
             raise ValueError(f"{path} has size {image.size}, expected {size}")
@@ -94,7 +107,7 @@ def most_changes_per_second(frames, fps, band=32):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("frames", nargs="+", help="frame paths or a quoted PNG glob")
+    parser.add_argument("frames", nargs="+", help="frame paths or a quoted glob: PNG, or nagi-render .npy for EDR")
     parser.add_argument("--fps", type=float, required=True, help="the rate the sequence was rendered at")
     parser.add_argument("--step", type=int, default=4,
                         help="sample every Nth row and column (1 checks every pixel; above 1 is an estimate)")
@@ -108,7 +121,8 @@ def main():
     if not paths:
         parser.error("no frames matched")
     paths.sort(key=lambda p: [int(s) if s.isdigit() else s for s in re.split(r"(\d+)", str(p))])
-    parts = [(p.parent, m.group(1), int(m.group(2))) for p in paths if (m := re.fullmatch(r"(.*)-(\d+)\.png", p.name))]
+    parts = [(p.parent, m.group(1) + p.suffix, int(m.group(2)))
+             for p in paths if (m := re.fullmatch(r"(.*)-(\d+)\.(?:png|npy)", p.name))]
     numbers = [number for _, _, number in parts]
     if (len(parts) != len(paths) or len({(folder, stem) for folder, stem, _ in parts}) != 1
             or numbers != list(range(numbers[0], numbers[0] + len(numbers)))):
@@ -117,8 +131,12 @@ def main():
     if len(paths) - 2 * trim < MINIMUM_SECONDS * args.fps:
         parser.error(f"need {MINIMUM_SECONDS} s after trimming 0.5 s at each end, got {len(paths)} frames")
 
-    with Image.open(paths[0]) as first:
-        size = first.size
+    if paths[0].suffix == ".npy":
+        height0, width0 = np.load(paths[0], mmap_mode="r").shape[:2]
+        size = (width0, height0)
+    else:
+        with Image.open(paths[0]) as first:
+            size = first.size
     width, height = (len(range(0, n, args.step)) for n in size)
     # On disk, so a full-resolution check of a long capture does not need it all in memory.
     store = tempfile.NamedTemporaryFile(suffix=".npy")

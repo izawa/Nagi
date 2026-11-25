@@ -49,7 +49,9 @@ import NagiKit
         return (id, values)
     })
 
-    let view = PreviewScene.display(pixels: options.size, physicalSize: options.physicalSize)
+    var view = PreviewScene.display(pixels: options.size, physicalSize: options.physicalSize)
+    view.edrHeadroom = options.edrHeadroom
+    view.potentialEDRHeadroom = options.edrHeadroom
     // The same weather hints the live engine mixes in (NagiEngine).
     var weather = options.weather
     weather.cloudBias = types.compactMap { $0.descriptor.weatherHint?.cloudBias }.reduce(0, +)
@@ -75,7 +77,11 @@ import NagiKit
                 try writeAlpha(TextureReader.pixels(of: overlay), size: options.size, to: output)
             } else {
                 let screen = try renderer.renderOffscreen(frame, view: view, strength: options.strength, background: options.background)
-                try TextureReader.writePNG(screen, to: output)
+                if output.pathExtension.lowercased() == "npy" {
+                    try writeNumPy(screen, to: output)
+                } else {
+                    try TextureReader.writePNG(screen, to: output)
+                }
             }
             print(output.path)
         }
@@ -110,6 +116,8 @@ struct Options {
     /// A built-in window arrangement or a JSON file (WindowLayout), and the windows' age.
     var windows: String?
     var windowAge = 7200.0
+    /// How far above SDR white the made-up display can show (1: not at all).
+    var edrHeadroom = 1.0
 
     init(_ arguments: [String]) throws {
         var index = 0
@@ -168,6 +176,9 @@ struct Options {
                 windowAge = try number(value())
                 guard windowAge >= 0 else { throw usage() }
             case "--output": output = URL(fileURLWithPath: try value())
+            case "--edr-headroom":
+                edrHeadroom = try number(value())
+                guard (1...16).contains(edrHeadroom) else { throw usage() }
             case "--debug-alpha":
                 debugAlpha = true
                 index += 1
@@ -180,6 +191,8 @@ struct Options {
             index += 1
         }
         if cloudPass { weather.sky = .cloudPass(start: time) }
+        // --debug-alpha writes grey PNGs, never NumPy arrays.
+        if debugAlpha, output.pathExtension.lowercased() == "npy" { throw usage() }
         // --seed once chose the canopy too: without --param tree it still does, so earlier
         // commands draw the same tree (the weather follows --seed either way).
         if parameters["tree"] == nil { parameters["tree"] = .number(Double(seed)) }
@@ -187,9 +200,23 @@ struct Options {
 
     func outputURL(for index: Int) -> URL {
         guard frames > 1 else { return output }
-        let base = output.pathExtension.lowercased() == "png" ? output.deletingPathExtension() : output
-        return URL(fileURLWithPath: base.path + String(format: "-%04ld.png", index))
+        let suffix = output.pathExtension.lowercased() == "npy" ? "npy" : "png"
+        let base = ["png", "npy"].contains(output.pathExtension.lowercased()) ? output.deletingPathExtension() : output
+        return URL(fileURLWithPath: base.path + String(format: "-%04ld.", index) + suffix)
     }
+}
+
+/// Writes the encoded Display P3 screen, unclipped, as a NumPy array of half floats (height ×
+/// width × 3): what a PNG cannot hold above SDR white, for `Tools/flicker.py` to measure.
+func writeNumPy(_ texture: any MTLTexture, to url: URL) throws {
+    var header = "{'descr': '<f2', 'fortran_order': False, 'shape': (\(texture.height), \(texture.width), 3), }"
+    header += String(repeating: " ", count: 63 - (10 + header.utf8.count) % 64) + "\n"
+    var data = Data([0x93] + Array("NUMPY".utf8) + [1, 0])
+    withUnsafeBytes(of: UInt16(header.utf8.count).littleEndian) { data.append(contentsOf: $0) }
+    data.append(contentsOf: Array(header.utf8))
+    let halves = TextureReader.pixels(of: texture).flatMap { [Float16($0.x), Float16($0.y), Float16($0.z)] }
+    halves.withUnsafeBytes { data.append(contentsOf: $0) }
+    try data.write(to: url)
 }
 
 func writeAlpha(_ pixels: [SIMD4<Float>], size: SIMD2<Int>, to url: URL) throws {
@@ -229,9 +256,11 @@ func usage() -> NagiCoreError {
     usage: nagi-render <effect[,effect…]> [--at ISO8601] [--time s] [--frames N] [--fps F] [--depth s] [--depth-rate r] [--input-at s] [--presence 0…1] \
     [--strength 0…1] [--appearance light|dark] [--seed n] [--background gray:<0…1>|<image>] \
     [--size WxH] [--physical-mm WxH] [--location lat,lon] [--sky clear|natural|pass] [--param key=value]… \
-    [--windows single|overlap|panel|fullscreen|empty|<file.json>] [--window-age s] [--debug-alpha] [--output file.png]
+    [--windows single|overlap|panel|fullscreen|empty|<file.json>] [--window-age s] [--edr-headroom 1…16] [--debug-alpha] \
+    [--output file.png|file.npy]
     --frames defaults to 1. Sequences default to 30 fps and write file-0000.png, file-0001.png, …
     --sky defaults to clear; pass is one cloud crossing the sun, starting at --time.
+    --edr-headroom lets the made-up display show above SDR white; a PNG clips that, so measure it from .npy output.
     --windows lays out made-up windows for effects that use them; --window-age (default 7200) is how long they have kept still.
     """)
 }
