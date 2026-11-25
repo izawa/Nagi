@@ -32,6 +32,27 @@ struct FlightTests {
         #expect(dusk > 0 && dusk < 1)
     }
 
+    /// Most in early summer, half in winter, smoothly through the year (M7-PLAN 4).
+    @Test func seasonScalesTheNumber() throws {
+        let tokyo = try #require(TimeZone(identifier: "Asia/Tokyo"))
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = tokyo
+        func day(_ year: Int, _ month: Int, _ day: Int, _ hour: Int = 0) throws -> Date {
+            try #require(calendar.date(from: DateComponents(year: year, month: month, day: day, hour: hour)))
+        }
+        #expect(abs(Fireflies.season(try day(2026, 6, 15)) - 1) < 1e-9)
+        #expect(abs(Fireflies.season(try day(2027, 6, 15)) - 1) < 1e-4)
+        #expect(abs(Fireflies.season(try day(2026, 12, 14, 12)) - 0.5) < 1e-4)
+        let spring = Fireflies.season(try day(2027, 3, 15))
+        #expect(spring > 0.7 && spring < 0.8)
+        // No step at the turn of the year.
+        #expect(abs(Fireflies.season(try day(2026, 12, 31, 23)) - Fireflies.season(try day(2027, 1, 1, 1))) < 1e-3)
+        let winter = try day(2026, 12, 15)
+        #expect([1, 2, 12, 15].map { Fireflies.count($0, on: winter) } == [1, 1, 6, 8])
+        #expect(Fireflies.count(12, on: try day(2026, 6, 15)) == 12)
+        #expect(Fireflies.count(12, on: Date(timeIntervalSince1970: .nan)) == 12)
+    }
+
     /// A desktop too big to leave, for following one firefly through its life.
     let wide = CGRect(x: -1e6, y: -1e6, width: 2e6, height: 2e6)
 

@@ -104,6 +104,20 @@ public final class Fireflies: Effect {
         return night(frame.environment) * strength
     }
 
+    /// The share of the fireflies that fly in a deep calm: 1 in mid-June, 0.5 in mid-December,
+    /// along a cosine over the year (M7-PLAN 4, question 2). Japan's seasons; not the southern ones.
+    static func season(_ date: Date) -> Double {
+        let peak = Date(timeIntervalSince1970: 1_781_449_200)  // 2026-06-15 00:00 JST
+        let year = 365.2425 * 86_400
+        let share = 0.75 + 0.25 * cos(2 * .pi * date.timeIntervalSince(peak) / year)
+        return share.isFinite ? share : 1
+    }
+
+    /// How many fly once the calm is deep: the set number for the season, at least 1.
+    static func count(_ number: Int, on date: Date) -> Int {
+        max(1, Int((Double(number) * season(date)).rounded()))
+    }
+
     /// The share of the distance flown: half for Reduce Motion (M7-PLAN 7).
     static func motion(_ frame: FrameState) -> Double { frame.accessibility.reduceMotion ? 0.5 : 1 }
 
@@ -117,9 +131,11 @@ public final class Fireflies: Effect {
     private let orbPipeline: any MTLRenderPipelineState
     private var swarm: Swarm?
     /// What the swarm was made for: another showing, desktop or setting starts over.
-    private var world: (seed: UInt64, displays: [CGRect], count: Int, period: Double)?
+    /// `flying` is `count` for the season the swarm was made in.
+    private var world: (seed: UInt64, displays: [CGRect], count: Int, flying: Int, period: Double)?
     private var lastTime: Double?
     private var lastDepth = 0.0
+    private var lastDate: Date?
 
     public init(context: EffectContext) throws {
         let library = try context.device.makeDefaultLibrary(bundle: Bundle.module)
@@ -140,25 +156,31 @@ public final class Fireflies: Effect {
         let period = Self.bounded(frame.number("period", default: 4), 3...5, default: 4)
         let seed = frame.seed &+ UInt64(frame.showing)
         let elapsed = lastTime.map { frame.time - $0 } ?? -1
+        // The season is read when the swarm is made, so midnight in a calm makes nothing anew. Only
+        // a date moved apart from the clock (the gallery's date, the Mac's clock set) into another
+        // number starts over.
+        let flying = Self.count(count, on: frame.date)
+        let dated = lastDate.map { abs(frame.date.timeIntervalSince($0) - elapsed) > 60 } ?? false
         // A depth that jumps or goes back (a preview's slider), the clock set back, or a long stall:
         // start over, as rain does.
         let seek = abs(depth - lastDepth) > max(2 * elapsed, 2) + 1 || elapsed > 2
             || (depth < lastDepth - 0.5 && frame.phase != .leaving)
         if frame.displays.isEmpty {
             swarm = nil
-        } else if frame.phase == .leaving, swarm != nil {
+        } else if frame.phase == .leaving, swarm != nil, world?.seed == seed {
             // Leaving, the lights hold still where they were (render): nothing moves, is born, let
             // go or made anew until the next showing.
         } else if let world, world.seed == seed, world.displays == frame.displays.sorted(by: Self.order), world.count == count,
-                  world.period == period, swarm != nil, elapsed >= 0, !seek {
+                  !dated || world.flying == flying, world.period == period, swarm != nil, elapsed >= 0, !seek {
             swarm?.advance(to: frame.time, depth: depth, motion: motion)
         } else {
-            world = (seed, frame.displays.sorted(by: Self.order), count, period)
-            swarm = Swarm(seed: seed, displays: frame.displays, count: count, period: period, depth: depth,
+            world = (seed, frame.displays.sorted(by: Self.order), count, flying, period)
+            swarm = Swarm(seed: seed, displays: frame.displays, count: flying, period: period, depth: depth,
                           now: frame.time)
         }
         lastTime = frame.time
         lastDepth = depth
+        lastDate = frame.date
     }
 
     public func render(_ frame: FrameState, view: DisplayView, encoder: any EffectEncoder) throws {
@@ -199,7 +221,11 @@ public final class Fireflies: Effect {
             let point = firefly.position
             let x = (point.x - view.frameInDesktop.minX) * view.scale
             let y = (point.y - view.frameInDesktop.minY) * view.scale
-            guard x > -reach, y > -reach, x < Double(view.pixelSize.x) + reach, y < Double(view.pixelSize.y) + reach
+            // The inner orb trails by orbLag seconds of flight, so further when it flies fast; one
+            // still on the screen keeps its light drawn.
+            let lag = orb > 0 ? firefly.velocity(at: time) * orbLag * view.scale : .zero
+            let margin = reach + (lag.x * lag.x + lag.y * lag.y).squareRoot()
+            guard x > -margin, y > -margin, x < Double(view.pixelSize.x) + margin, y < Double(view.pixelSize.y) + margin
             else { continue }
             let alpha = (Self.farAlpha + (Self.nearAlpha - Self.farAlpha) * near) * brightness * visibility
             instances.append(Instance(centre: SIMD4(Float(x), Float(y), Float(core), Float(glow)),
@@ -207,11 +233,9 @@ public final class Fireflies: Effect {
             if orb > 0 {
                 // A share (orbSize) of the bright part's radius: two core spreads in focus, the disc out
                 // of it; 0.25 looks half the green (W1). Its blur is scaled with it, so it stays inside the green (W1: at the
-                // light's own blur it spread over the whole light). It is offset by orbLag
-                // seconds of flight, so further when it flies fast.
+                // light's own blur it spread over the whole light).
                 let radius = orbSize * max(2 * core, blur)
                 let orbBlur = orbSize * blur
-                let lag = firefly.velocity(at: time) * orbLag * view.scale
                 // The edge a little softer than first drawn (W1: 15 % of the radius).
                 let edge = 0.2 * radius + 0.5
                 orbs.append(Instance(centre: SIMD4(Float(x - lag.x), Float(y - lag.y), Float(radius), Float(edge)),
