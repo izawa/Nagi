@@ -42,7 +42,7 @@ public final class Fireflies: Effect {
             // positive behind (W1: at −0.12 the author saw it lead; it should trail).
             ParameterSpec(key: "orb", label: "中の球", kind: .slider(range: 0...1, defaultValue: 0.8)),
             ParameterSpec(key: "orbSize", label: "中の球の大きさ", kind: .slider(range: 0.1...1, defaultValue: 0.25)),
-            ParameterSpec(key: "orbLag", label: "中の球の遅れ", kind: .slider(range: -0.4...0.4, defaultValue: 0.12)),
+            ParameterSpec(key: "orbLag", label: "中の球の遅れ", kind: .slider(range: -0.4...0.4, defaultValue: orbLag)),
         ])
 
     /// Strongest alpha at the core of a far and of a near light (M7-PLAN 5, 【仮】). The plan's
@@ -55,6 +55,9 @@ public final class Fireflies: Effect {
     /// The inner orb's colour: yellower than the first colour (0.80, 1.0, 0.32), which read too
     /// yellow for the whole light (W1).
     static let orbColour = SIMD3<Float>(1.0, 0.95, 0.25)
+    /// Seconds of flight the inner orb trails by: 0.3 times the first 0.12, which trailed too far
+    /// when flying fast (W1).
+    static let orbLag = 0.036
     /// The dark around a light in the "shade" look: komorebi's near-black (SPEC 4.1).
     static let shadeColour = SIMD3<Float>(0.0, 0.006, 0.004)
 
@@ -175,7 +178,7 @@ public final class Fireflies: Effect {
         let shade = Self.bounded(frame.number("shade", default: 0.3), 0...0.6, default: 0.3)
         let orb = Self.bounded(frame.number("orb", default: 0.8), 0...1, default: 0.8)
         let orbSize = Self.bounded(frame.number("orbSize", default: 0.25), 0.1...1, default: 0.25)
-        let orbLag = Self.bounded(frame.number("orbLag", default: 0.12), -0.4...0.4, default: 0.12) * Self.motion(frame)
+        let orbLag = Self.bounded(frame.number("orbLag", default: Self.orbLag), -0.4...0.4, default: Self.orbLag) * Self.motion(frame)
         var instances: [Instance] = [], orbs: [Instance] = []
         // Leaving, each light keeps where and how bright it was at the last frame before the input,
         // and the core fades it (M7-PLAN 6).
@@ -209,7 +212,8 @@ public final class Fireflies: Effect {
                 let radius = orbSize * max(2 * core, blur)
                 let orbBlur = orbSize * blur
                 let lag = firefly.velocity(at: time) * orbLag * view.scale
-                let edge = 0.15 * radius + 0.5
+                // The edge a little softer than first drawn (W1: 15 % of the radius).
+                let edge = 0.2 * radius + 0.5
                 orbs.append(Instance(centre: SIMD4(Float(x - lag.x), Float(y - lag.y), Float(radius), Float(edge)),
                                      shape: SIMD4(Float(orbBlur), Float(radius + 2 * edge + orbBlur + 2), Float(alpha * orb), 0)))
             }
