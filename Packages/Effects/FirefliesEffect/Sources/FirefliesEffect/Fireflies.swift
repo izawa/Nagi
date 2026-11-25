@@ -43,6 +43,8 @@ public final class Fireflies: Effect {
             ParameterSpec(key: "orb", label: "中の球", kind: .slider(range: 0...1, defaultValue: 0.8)),
             ParameterSpec(key: "orbSize", label: "中の球の大きさ", kind: .slider(range: 0.1...1, defaultValue: 0.25)),
             ParameterSpec(key: "orbLag", label: "中の球の遅れ", kind: .slider(range: -0.4...0.4, defaultValue: orbLag)),
+            // How far the wind carries them, times `Firefly.breezeDrift` and `gustDrift`.
+            ParameterSpec(key: "drift", label: "風で流れる", kind: .slider(range: 0...6, defaultValue: 1)),
         ])
 
     /// Strongest alpha at the core of a far and of a near light (M7-PLAN 5, 【仮】). The plan's
@@ -172,7 +174,8 @@ public final class Fireflies: Effect {
             // go or made anew until the next showing.
         } else if let world, world.seed == seed, world.displays == frame.displays.sorted(by: Self.order), world.count == count,
                   !dated || world.flying == flying, world.period == period, swarm != nil, elapsed >= 0, !seek {
-            swarm?.advance(to: frame.time, depth: depth, motion: motion, wind: frame.environment.wind)
+            swarm?.advance(to: frame.time, depth: depth, motion: motion, wind: frame.environment.wind,
+                           drift: Self.bounded(frame.number("drift", default: 1), 0...6, default: 1))
         } else {
             world = (seed, frame.displays.sorted(by: Self.order), count, flying, period)
             swarm = Swarm(seed: seed, displays: frame.displays, count: flying, period: period, depth: depth,

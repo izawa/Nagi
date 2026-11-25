@@ -93,9 +93,10 @@ struct Firefly: Equatable {
     }
 
     /// Apparent drift on the screen at full wind, mm/s, for the nearest firefly: the mean wind at
-    /// its strongest and a gust at full strength, 2 mm/s together (M7-PLAN 4).
-    static let breezeDrift = 0.4
-    static let gustDrift = 1.6
+    /// its strongest and a gust at full strength, 6 mm/s together. Three times M7-PLAN 4's 2 mm/s:
+    /// the author found that too little to see.
+    static let breezeDrift = 1.2
+    static let gustDrift = 4.8
     /// The strongest mean wind the core makes, m/s (WindModel.maximumSpeed in NagiCore).
     static let strongestWind = 3.5
 
@@ -103,13 +104,14 @@ struct Firefly: Equatable {
     /// direction, and a gust where its front has reached along the front's travel. Nearer ones
     /// drift more, in the ratio their flight speeds have. Reduce Motion halves the breeze and
     /// stops the gusts (M7-PLAN 7).
-    func drift(in wind: Wind, at time: Double, reduceMotion: Bool) -> SIMD2<Double> {
+    /// `scale` multiplies both (the gallery's "wind" parameter).
+    func drift(in wind: Wind, at time: Double, reduceMotion: Bool, scale: Double = 1) -> SIMD2<Double> {
         let breeze = wind.velocity * (Self.breezeDrift / Self.strongestWind) * (reduceMotion ? 0.5 : 1)
         let gust = reduceMotion ? .zero
             : wind.frontDirection * Self.gustDrift * wind.gust(at: position / Swarm.pointsPerMillimetre)
         let parallax = (Self.speeds.lowerBound + (Self.speeds.upperBound - Self.speeds.lowerBound) * nearness(at: time))
             / Self.speeds.upperBound
-        let drift = (breeze + gust) * parallax * Swarm.pointsPerMillimetre
+        let drift = (breeze + gust) * parallax * scale * Swarm.pointsPerMillimetre
         return drift.x.isFinite && drift.y.isFinite ? drift : .zero
     }
 
@@ -208,8 +210,8 @@ struct Swarm {
     /// Moves the fireflies on to `now`, fills the slots `depth` has reached, and replaces those
     /// that have flown their life or left the desktop (they fly on and away, not back: M7-PLAN 3).
     /// `motion` scales the distance flown (Reduce Motion halves it, SPEC 2.2); `wind` carries them.
-    mutating func advance(to now: Double, depth: Double, motion: Double = 1, wind: Wind? = nil) {
-        step(to: now, depth: depth, motion: motion, wind: wind)
+    mutating func advance(to now: Double, depth: Double, motion: Double = 1, wind: Wind? = nil, drift: Double = 1) {
+        step(to: now, depth: depth, motion: motion, wind: wind, drift: drift)
         let field = bounds.insetBy(dx: -Self.margin, dy: -Self.margin)
         for slot in fireflies.indices {
             if let firefly = fireflies[slot], firefly.isDone(at: now) || !field.contains(firefly.point) {
@@ -240,7 +242,7 @@ struct Swarm {
     /// Moves every firefly to `now` in steps of at most 1/20 s: along its course, and its phase at
     /// its own rate, pulled towards the flock's mean phase as hard as the depth allows. `wind` is
     /// the one at `now`; each step reads its gusts at the step's own moment on the wind clock.
-    private mutating func step(to now: Double, depth: Double, motion: Double, wind: Wind?) {
+    private mutating func step(to now: Double, depth: Double, motion: Double, wind: Wind?, drift scale: Double) {
         let pull = Self.coupling * Self.pull(depth: depth)
         var remaining = max(now - time, 0)
         while remaining > 0 {
@@ -256,7 +258,7 @@ struct Swarm {
                 let drift = wind.map { now in
                     var then = now
                     then.time -= remaining + step / 2
-                    return firefly.drift(in: then, at: at - step / 2, reduceMotion: motion < 1)
+                    return firefly.drift(in: then, at: at - step / 2, reduceMotion: motion < 1, scale: scale)
                 } ?? .zero
                 firefly.advance(step: step, now: at, rate: 1 / firefly.period + pull * towards / (2 * .pi), motion: motion,
                                 drift: drift)

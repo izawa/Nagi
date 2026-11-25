@@ -223,7 +223,7 @@ struct FlightTests {
     }
 
     /// The wind carries them a little (M7-PLAN 4): the breeze along its direction, a gust along its
-    /// front where the front has reached; 2 mm/s at most, less for far ones.
+    /// front where the front has reached; 6 mm/s at most, less for far ones.
     @Test func windCarriesThemALittle() {
         let firefly = Swarm(seed: 3, displays: [wide], count: 1, period: 4, depth: 60, now: 0).fireflies[0]!
         let perMillimetre = Swarm.pointsPerMillimetre
@@ -234,19 +234,20 @@ struct FlightTests {
             - Firefly.breezeDrift * parallax) < 1e-9)
         // The breeze along its own direction, scaled with its speed.
         let breeze = mm(firefly.drift(in: Wind(velocity: SIMD2(0, -1.75)), at: 0, reduceMotion: false))
-        #expect(abs(breeze.x) < 1e-12 && abs(breeze.y + 0.2 * parallax) < 1e-9)
+        #expect(abs(breeze.x) < 1e-12 && abs(breeze.y + Firefly.breezeDrift / 2 * parallax) < 1e-9)
         // A full gust whose front is at the firefly now, along the front, with the strongest breeze
-        // across it: 2 mm/s together at most.
+        // across it: 6 mm/s together at most.
         let local = (firefly.position / perMillimetre).x / Wind.frontSpeed
         let gust = Wind.Gust(onset: -2, rise: 2, duration: 8, strength: 1)
         let gusty = Wind(velocity: SIMD2(3.5, 0), time: local, frontDirection: SIMD2(1, 0), gusts: [gust])
         let carried = mm(firefly.drift(in: gusty, at: 0, reduceMotion: false))
-        #expect(abs(carried.x - 2 * parallax) < 1e-9)
+        #expect(abs(carried.x - (Firefly.breezeDrift + Firefly.gustDrift) * parallax) < 1e-9)
+        #expect(Firefly.breezeDrift + Firefly.gustDrift == 6)
         // Before the front reaches it, the breeze only.
         let early = Wind(velocity: SIMD2(3.5, 0), time: local - 3, frontDirection: SIMD2(1, 0), gusts: [gust])
-        #expect(abs(mm(firefly.drift(in: early, at: 0, reduceMotion: false)).x - 0.4 * parallax) < 1e-9)
+        #expect(abs(mm(firefly.drift(in: early, at: 0, reduceMotion: false)).x - Firefly.breezeDrift * parallax) < 1e-9)
         // Reduce Motion: half the breeze, no gust.
-        #expect(abs(mm(firefly.drift(in: gusty, at: 0, reduceMotion: true)).x - 0.2 * parallax) < 1e-9)
+        #expect(abs(mm(firefly.drift(in: gusty, at: 0, reduceMotion: true)).x - Firefly.breezeDrift / 2 * parallax) < 1e-9)
         // No wind, no drift; a broken wind, none either.
         #expect(firefly.drift(in: Wind(), at: 0, reduceMotion: false) == .zero)
         #expect(firefly.drift(in: Wind(velocity: SIMD2(.nan, 0)), at: 0, reduceMotion: false) == .zero)
@@ -261,8 +262,9 @@ struct FlightTests {
             carried.advance(to: Double(step) / 20, depth: 60, wind: wind)
         }
         let shift = (carried.fireflies[0]!.position - still.fireflies[0]!.position) / Swarm.pointsPerMillimetre
-        // 10 s at 0.4 mm/s times its parallax.
-        #expect(shift.x > 10 * 0.4 * 5 / 16 - 1e-6 && shift.x < 10 * 0.4 + 1e-6)
+        // 10 s of the strongest breeze times its parallax.
+        let most = 10 * Firefly.breezeDrift
+        #expect(shift.x > most * 5 / 16 - 1e-6 && shift.x < most + 1e-6)
         #expect(abs(shift.y) < 1e-9)
         #expect(still.fireflies[0]!.phase == carried.fireflies[0]!.phase)
     }
