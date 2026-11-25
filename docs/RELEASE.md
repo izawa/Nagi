@@ -22,6 +22,7 @@
    (cd Packages/NagiKit && swift test)
    (cd Packages/NagiCore && swift test)
    (cd Packages/Effects/KomorebiEffect && swift test)
+   (cd Packages/Effects/FirefliesEffect && swift test)
    ```
 3. **DMG を作る。** 作業ツリーにコミットしていない変更があると止まる。
    ```sh

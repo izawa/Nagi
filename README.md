@@ -23,6 +23,7 @@ Turn on the ones you like. With several on, Nagi layers them. With **Show One at
 | Komorebi | Sunlight falling through gaps in the canopy, following the time of day and the sun's height; at night, faint moonlight (can be turned off) | Not needed |
 | Rain | Raindrops on glass, refracting the screen behind them | Needed |
 | Light Under Water | Light rippling on the bottom of shallow water | Not needed |
+| Fireflies | After sunset, fireflies fly in the dark beyond the screen, lighting up and dying away. More in early summer, fewer in winter | Not needed |
 | Gems | Crystals growing along the edges of windows you leave in place | Needed |
 | Ripples | Ripples from drops falling into a thin layer of water over the screen (off by default; see below) | Needed |
 
