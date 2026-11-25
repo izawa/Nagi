@@ -280,11 +280,11 @@ struct Swarm {
     }
 
     /// Whether `shares` would make the same swarm: births split alike over the displays, and the
-    /// slots paced alike (the pace stops at a 27-inch display's).
+    /// slots paced alike (the pace stops at a 27-inch display's; one slot always opens at 30 s).
     func isShaped(by shares: [Double]) -> Bool {
         let total = shares.reduce(0, +), own = screen
         guard shares.count == weights.count, total > 0, own > 0 else { return false }
-        return abs(min(total, 1) - min(own, 1)) < 1e-9
+        return (fireflies.count <= 1 || abs(min(total, 1) - min(own, 1)) < 1e-9)
             && zip(shares, weights).allSatisfy { abs($0 / total - $1 / own) < 1e-9 }
     }
 

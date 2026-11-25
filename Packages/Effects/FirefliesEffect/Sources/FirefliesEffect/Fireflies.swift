@@ -198,7 +198,8 @@ public final class Fireflies: Effect {
             // go or made anew until the next showing.
         } else if let world, world.seed == seed, world.displays == screens, world.count == count,
                   !dated || world.flying == flying, world.period == period, swarm != nil, elapsed >= 0, !seek,
-                  world.drawn || swarm?.isShaped(by: Swarm.shares(screens, millimetres: millimetres)) == true,
+                  // Compared once, when every display has been drawn, not on the way there.
+                  world.drawn || !drawn || swarm?.isShaped(by: Swarm.shares(screens, millimetres: millimetres)) == true,
                   // A size that changes the number today starts over; one that does not keeps the lights.
                   Self.count(count, on: frame.date, screen: world.screen) == flying {
             swarm?.reweigh(millimetres: millimetres)
