@@ -154,6 +154,7 @@ struct FlightTests {
     /// The first light by about 35 s of calm, one more slot every 20 s; a deep start finds them
     /// flying, on the desktop.
     @Test func slotsFillAsTheCalmDeepens() {
+        let bounds = CGRect(x: 0, y: 0, width: 2560, height: 1440)  // a 27-inch display
         var swarm = Swarm(seed: 5, displays: [bounds], count: 3, period: 4, depth: 0, now: 0)
         #expect(swarm.fireflies.allSatisfy { $0 == nil })
         swarm.advance(to: 29, depth: 29)
@@ -166,6 +167,17 @@ struct FlightTests {
         let waits = deep.fireflies.map { (1 - $0!.phase) * $0!.period }
         #expect(waits[0] < 2 && waits.dropFirst().allSatisfy { $0 >= waits[0] - 1e-9 })
         for firefly in deep.fireflies { #expect(bounds.contains(firefly!.point)) }
+        // A desktop of half the area: the first as soon, the next twice as long after.
+        let half = CGRect(x: 0, y: 0, width: 1280, height: 1440)
+        #expect(Swarm.threshold(0, screen: 0.5) == 30 && Swarm.threshold(1, screen: 0.5) == 70)
+        let small = Swarm(seed: 5, displays: [half], count: 3, period: 4, depth: 120, now: 500)
+        #expect(small.fireflies.map { $0 != nil } == [true, true, true])
+        let shallow = Swarm(seed: 5, displays: [half], count: 3, period: 4, depth: 100, now: 500)
+        #expect(shallow.fireflies.map { $0 != nil } == [true, true, false])
+        // Its sizes learnt later: a 27-inch measured, it paces as one.
+        var learnt = shallow
+        learnt.reweigh(millimetres: [Swarm.key(half): Swarm.referenceMillimetres])
+        #expect(learnt.screen == 1)
     }
 
     /// A firefly that has flown its life gives its slot to a new one after some dark.
@@ -281,5 +293,64 @@ struct FlightTests {
         late.advance(to: 1, depth: 60, wind: wind(1))
         let gap = simd_length(smooth.fireflies[0]!.position - late.fireflies[0]!.position)
         #expect(gap < 1e-6)
+    }
+
+    /// The number is for a 27-inch display: fewer on a smaller one by its area, no more on a larger
+    /// desktop (M7-PLAN 6).
+    @Test func theNumberFollowsTheScreen() throws {
+        let june = Date(timeIntervalSince1970: 1_781_449_200)
+        #expect(Fireflies.count(12, on: june, screen: 1) == 12)
+        #expect(Fireflies.count(12, on: june, screen: 0.5) == 6)
+        #expect(Fireflies.count(12, on: june, screen: 4) == 12)
+        #expect(Fireflies.count(1, on: june, screen: 0.001) == 1)
+        #expect(Fireflies.count(12, on: june, screen: .nan) == 12)
+        // The season on top: half in winter, on the small screen too.
+        let winter = try #require(Calendar(identifier: .gregorian).date(byAdding: .day, value: 182, to: june))
+        #expect(Fireflies.count(12, on: winter, screen: 0.5) == 3)
+        // The share: by physical size where known, else by points. A 13-inch MacBook Air (1470 ×
+        // 956 points, 302 × 196 mm) is 0.3 of a 27-inch; a 1280 × 720 point preview of a 27-inch
+        // screen is all of it.
+        let air = CGRect(x: 0, y: 0, width: 1470, height: 956)
+        #expect(abs(Swarm.share([air], millimetres: [Swarm.key(air): 302 * 196]) - 0.295) < 0.001)
+        #expect(Fireflies.count(12, on: june, screen: Swarm.share([air], millimetres: [Swarm.key(air): 302 * 196])) == 4)
+        #expect(Fireflies.count(12, on: june, screen: Swarm.share([air], millimetres: [:])) == 5)
+        let one = CGRect(x: 0, y: 0, width: 1280, height: 720)
+        #expect(Swarm.share([one], millimetres: [Swarm.key(one): Swarm.referenceMillimetres]) == 1)
+        #expect(Swarm.share([one], millimetres: [:]) == 0.25)
+        // A mirrored display, an empty one: counted once, not at all.
+        #expect(Swarm.area([one, one, CGRect(x: 0, y: 0, width: 0, height: 900)]) == 1280 * 720)
+        #expect(Swarm.screens([CGRect(x: 1280, y: 0, width: 10, height: 10), one]) == Swarm.screens([one, CGRect(x: 1280, y: 0, width: 10, height: 10)]))
+    }
+
+    /// Newborns go to a display by its share of the area.
+    @Test func bornByArea() {
+        let big = CGRect(x: 0, y: 0, width: 2560, height: 1440)
+        let small = CGRect(x: 2560, y: 0, width: 1280, height: 720)  // a quarter of the big one
+        var onSmall = 0, total = 0
+        for seed in 0..<400 as Range<UInt64> {
+            let swarm = Swarm(seed: seed, displays: [small, big], count: 5, period: 4, depth: 200, now: 0)
+            for case let firefly? in swarm.fireflies {
+                total += 1
+                if small.contains(firefly.point) { onSmall += 1 } else { #expect(big.contains(firefly.point)) }
+            }
+        }
+        let share = Double(onSmall) / Double(total)
+        #expect(abs(share - 0.2) < 0.03)
+    }
+
+    /// Two displays of the same physical size get as many each, whatever their points.
+    @Test func bornByPhysicalArea() {
+        let fine = CGRect(x: 0, y: 0, width: 2560, height: 1440)
+        let coarse = CGRect(x: 2560, y: 0, width: 1280, height: 720)
+        let sizes = [Swarm.key(fine): Swarm.referenceMillimetres, Swarm.key(coarse): Swarm.referenceMillimetres]
+        var onCoarse = 0, total = 0
+        for seed in 0..<400 as Range<UInt64> {
+            let swarm = Swarm(seed: seed, displays: [fine, coarse], millimetres: sizes, count: 5, period: 4, depth: 200, now: 0)
+            for case let firefly? in swarm.fireflies {
+                total += 1
+                if coarse.contains(firefly.point) { onCoarse += 1 }
+            }
+        }
+        #expect(abs(Double(onCoarse) / Double(total) - 0.5) < 0.04)
     }
 }

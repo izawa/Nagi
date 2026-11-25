@@ -158,9 +158,12 @@ struct Firefly: Equatable {
 struct Swarm {
     /// Desktop points per millimetre of flight, for every display (komorebi's desktop pitch).
     static let pointsPerMillimetre = 109 / 25.4
-    /// The depth at which slot `k` first fills: the first light by about 35 s, one more every
-    /// 20 s (the twelfth at 250 s).
-    static func threshold(_ slot: Int) -> Double { 30 + 20 * Double(slot) }
+    /// The depth at which slot `k` first fills: the first light by about 35 s, then one more every
+    /// 20 s on a 27-inch display (the twelfth at 250 s), more slowly on a smaller desktop (`screen`,
+    /// its share of a 27-inch), so it is no more crowded at any depth (M7-PLAN 6).
+    static func threshold(_ slot: Int, screen: Double = 1) -> Double {
+        30 + 20 * Double(slot) / min(max(screen.isFinite ? screen : 1, 0.01), 1)
+    }
     /// How strongly the flashes pull together, radians a second, at full depth: well above the
     /// spread of their own rates (±5 % of 2π / 4 s ≈ 0.08), so they fall into step in tens of
     /// seconds and stay a little apart.
@@ -169,10 +172,48 @@ struct Swarm {
     static func pull(depth: Double) -> Double { Firefly.smooth((depth - 60) / 240) }
     /// How far past the desktop's edge a firefly is let go: its glow is gone well before.
     static let margin = 60.0
+    /// The screen the set number is for: a 27-inch display (597 × 336 mm, M7-PLAN 6), and the same
+    /// in points at `pointsPerMillimetre` (a 5K 27-inch's 2560 × 1440) for a display of unknown size.
+    static let referenceMillimetres = 597.0 * 336
+    static let referenceArea = 2560.0 * 1440
+
+    /// A display's key: its rectangle.
+    static func key(_ display: CGRect) -> [Double] { [display.minX, display.minY, display.width, display.height] }
+
+    /// The displays to fly over: each once (a mirrored display reports the same rectangle), none
+    /// empty, in one order.
+    static func screens(_ displays: [CGRect]) -> [CGRect] {
+        var seen = Set<[Double]>()
+        return displays
+            .filter { $0.width > 0 && $0.height > 0 && $0.width.isFinite && $0.height.isFinite }
+            .filter { seen.insert(key($0)).inserted }
+            .sorted { ($0.minX, $0.minY) < ($1.minX, $1.minY) }
+    }
+
+    /// The area the displays cover, points².
+    static func area(_ displays: [CGRect]) -> Double {
+        screens(displays).reduce(0) { $0 + $1.width * $1.height }
+    }
+
+    /// Each of `screens(displays)`'s area against a 27-inch display: by its physical size where it
+    /// is known (a preview says how large a screen it shows), else by its points.
+    static func shares(_ displays: [CGRect], millimetres: [[Double]: Double]) -> [Double] {
+        screens(displays).map { millimetres[key($0)].map { $0 / referenceMillimetres } ?? $0.width * $0.height / referenceArea }
+    }
+
+    /// The whole desktop's area against a 27-inch display.
+    static func share(_ displays: [CGRect], millimetres: [[Double]: Double]) -> Double {
+        shares(displays, millimetres: millimetres).reduce(0, +)
+    }
 
     let seed: UInt64
     /// The displays the fireflies are born over, and the rectangle around them, points.
     let displays: [CGRect]
+    /// Each display's share of the births: its area against a 27-inch display (`shares`). The sizes
+    /// may become known after the swarm is made (`reweigh`).
+    private(set) var weights: [Double]
+    /// The desktop's share of a 27-inch display, which paces the slots.
+    var screen: Double { weights.reduce(0, +) }
     let bounds: CGRect
     let period: Double
     private(set) var fireflies: [Firefly?]
@@ -184,10 +225,12 @@ struct Swarm {
 
     /// The slots that should be filled at `depth` and `now`, as if the calm had deepened to it
     /// (a showing that starts deep, "see it now", finds fireflies already flying).
-    init(seed: UInt64, displays: [CGRect], count: Int, period: Double, depth: Double, now: Double) {
+    init(seed: UInt64, displays: [CGRect], millimetres: [[Double]: Double] = [:], count: Int, period: Double,
+         depth: Double, now: Double) {
         self.seed = seed
-        self.displays = displays.sorted { ($0.minX, $0.minY) < ($1.minX, $1.minY) }
-        bounds = displays.reduce(CGRect.null) { $0.union($1) }
+        self.displays = Self.screens(displays)
+        weights = Self.shares(displays, millimetres: millimetres)
+        bounds = self.displays.reduce(CGRect.null) { $0.union($1) }
         self.period = period
         fireflies = Array(repeating: nil, count: count)
         nextBirth = Array(repeating: .infinity, count: count)
@@ -198,8 +241,8 @@ struct Swarm {
         // together.
         let first = 0.6 + 1.2 * Hash.unit(seed, 600)
         let scatter = 1 - Self.pull(depth: depth)
-        for slot in 0..<count where depth >= Self.threshold(slot) {
-            let age = min(depth - Self.threshold(slot), 40 * Hash.unit(seed, 500 + slot))
+        for slot in 0..<count where depth >= Self.threshold(slot, screen: screen) {
+            let age = min(depth - Self.threshold(slot, screen: screen), 40 * Hash.unit(seed, 500 + slot))
             var firefly = make(slot: slot, born: now - age, phase: 0)
             let wait = first + (slot == 0 ? 0 : scatter * (firefly.period - first) * Hash.unit(seed, 600 + slot))
             firefly.phase = max(1 - wait / firefly.period, 0)
@@ -219,13 +262,20 @@ struct Swarm {
                 // Some seconds of dark before the next one.
                 nextBirth[slot] = now + 2 + 6 * Hash.unit(seed &+ UInt64(births[slot]), 700 + slot)
             }
-            guard fireflies[slot] == nil, depth >= Self.threshold(slot) else { continue }
+            guard fireflies[slot] == nil, depth >= Self.threshold(slot, screen: screen) else { continue }
             if nextBirth[slot] == .infinity { nextBirth[slot] = now }
             guard now >= nextBirth[slot] else { continue }
             // A newcomer flashes first in 0.5 … 2 s, out of step; the flock draws it in.
             let wait = 0.5 + 1.5 * Hash.unit(seed &+ UInt64(births[slot]), 800 + slot)
             fireflies[slot] = make(slot: slot, born: now, phase: max(1 - wait / period, 0))
         }
+    }
+
+    /// New shares for the same displays (their physical sizes now known): births and slots follow
+    /// them; those flying stay where they are.
+    mutating func reweigh(millimetres: [[Double]: Double]) {
+        let shares = Self.shares(displays, millimetres: millimetres)
+        if shares.count == weights.count { weights = shares }
     }
 
     /// The flock's order, 0 (scattered) … 1 (in step): the length of the mean of their phases.
@@ -271,7 +321,10 @@ struct Swarm {
     private mutating func make(slot: Int, born: Double, phase: Double) -> Firefly {
         births[slot] += 1
         let key = seed &+ UInt64(slot) &* 0x9E37_79B9 &+ UInt64(births[slot]) &* 0x85EB_CA6B
-        let display = displays[min(Int(Hash.unit(key, 8) * Double(displays.count)), displays.count - 1)]
+        // A display by its share of the area, so they are as many to the square millimetre on each.
+        var pick = Hash.unit(key, 8) * weights.reduce(0, +)
+        let index = weights.indices.first { pick -= weights[$0]; return pick < 0 } ?? displays.count - 1
+        let display = displays[index]
         let position = SIMD2(display.minX + display.width * Hash.unit(key, 5),
                              display.minY + display.height * Hash.unit(key, 6))
         // Towards the middle of its display, give or take 70°: one born near an edge crosses the
