@@ -221,4 +221,63 @@ struct FlightTests {
         let b = Swarm(seed: 11, displays: [bounds], count: 4, period: 4, depth: 200, now: 10)
         #expect(a.fireflies == b.fireflies)
     }
+
+    /// The wind carries them a little (M7-PLAN 4): the breeze along its direction, a gust along its
+    /// front where the front has reached; 2 mm/s at most, less for far ones.
+    @Test func windCarriesThemALittle() {
+        let firefly = Swarm(seed: 3, displays: [wide], count: 1, period: 4, depth: 60, now: 0).fireflies[0]!
+        let perMillimetre = Swarm.pointsPerMillimetre
+        func mm(_ v: SIMD2<Double>) -> SIMD2<Double> { v / perMillimetre }
+        // Its share by its distance: its flight speed against the nearest's.
+        let parallax = (5 + 11 * firefly.nearness(at: 0)) / 16
+        #expect(abs(mm(firefly.drift(in: Wind(velocity: SIMD2(3.5, 0)), at: 0, reduceMotion: false)).x
+            - Firefly.breezeDrift * parallax) < 1e-9)
+        // The breeze along its own direction, scaled with its speed.
+        let breeze = mm(firefly.drift(in: Wind(velocity: SIMD2(0, -1.75)), at: 0, reduceMotion: false))
+        #expect(abs(breeze.x) < 1e-12 && abs(breeze.y + 0.2 * parallax) < 1e-9)
+        // A full gust whose front is at the firefly now, along the front, with the strongest breeze
+        // across it: 2 mm/s together at most.
+        let local = (firefly.position / perMillimetre).x / Wind.frontSpeed
+        let gust = Wind.Gust(onset: -2, rise: 2, duration: 8, strength: 1)
+        let gusty = Wind(velocity: SIMD2(3.5, 0), time: local, frontDirection: SIMD2(1, 0), gusts: [gust])
+        let carried = mm(firefly.drift(in: gusty, at: 0, reduceMotion: false))
+        #expect(abs(carried.x - 2 * parallax) < 1e-9)
+        // Before the front reaches it, the breeze only.
+        let early = Wind(velocity: SIMD2(3.5, 0), time: local - 3, frontDirection: SIMD2(1, 0), gusts: [gust])
+        #expect(abs(mm(firefly.drift(in: early, at: 0, reduceMotion: false)).x - 0.4 * parallax) < 1e-9)
+        // Reduce Motion: half the breeze, no gust.
+        #expect(abs(mm(firefly.drift(in: gusty, at: 0, reduceMotion: true)).x - 0.2 * parallax) < 1e-9)
+        // No wind, no drift; a broken wind, none either.
+        #expect(firefly.drift(in: Wind(), at: 0, reduceMotion: false) == .zero)
+        #expect(firefly.drift(in: Wind(velocity: SIMD2(.nan, 0)), at: 0, reduceMotion: false) == .zero)
+    }
+
+    /// The swarm moves with the wind and flashes as before.
+    @Test func theSwarmDriftsDownwind() {
+        var still = Swarm(seed: 3, displays: [wide], count: 1, period: 4, depth: 60, now: 0), carried = still
+        let wind = Wind(velocity: SIMD2(3.5, 0))
+        for step in 1...200 {
+            still.advance(to: Double(step) / 20, depth: 60)
+            carried.advance(to: Double(step) / 20, depth: 60, wind: wind)
+        }
+        let shift = (carried.fireflies[0]!.position - still.fireflies[0]!.position) / Swarm.pointsPerMillimetre
+        // 10 s at 0.4 mm/s times its parallax.
+        #expect(shift.x > 10 * 0.4 * 5 / 16 - 1e-6 && shift.x < 10 * 0.4 + 1e-6)
+        #expect(abs(shift.y) < 1e-9)
+        #expect(still.fireflies[0]!.phase == carried.fireflies[0]!.phase)
+    }
+
+    /// A late frame reads each gust at its own moment: one update of a second carries a firefly as
+    /// twenty of a twentieth do.
+    @Test func aLateFrameReadsGustsInTime() {
+        var smooth = Swarm(seed: 3, displays: [wide], count: 1, period: 4, depth: 60, now: 0), late = smooth
+        // The front reaches it half a second in, wherever it is.
+        let reach = (smooth.fireflies[0]!.position / Swarm.pointsPerMillimetre).x / Wind.frontSpeed
+        let gust = Wind.Gust(onset: 0.5 - reach, rise: 0.5, duration: 1, strength: 1)
+        func wind(_ t: Double) -> Wind { Wind(velocity: .zero, time: t, frontDirection: SIMD2(1, 0), gusts: [gust]) }
+        for step in 1...20 { smooth.advance(to: Double(step) / 20, depth: 60, wind: wind(Double(step) / 20)) }
+        late.advance(to: 1, depth: 60, wind: wind(1))
+        let gap = simd_length(smooth.fireflies[0]!.position - late.fireflies[0]!.position)
+        #expect(gap < 1e-6)
+    }
 }

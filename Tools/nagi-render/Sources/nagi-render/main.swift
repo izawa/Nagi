@@ -145,6 +145,7 @@ struct Options {
                 case "pass": cloudPass = true
                 default: throw usage()
                 }
+            case "--strongest-wind": weather.strongestWind = true
             case "--depth": depth = try number(value())
             case "--depth-rate": depthRate = try number(value())
             case "--input-at": inputAt = try number(value())
@@ -255,11 +256,12 @@ func usage() -> NagiCoreError {
     NagiCoreError("""
     usage: nagi-render <effect[,effect…]> [--at ISO8601] [--time s] [--frames N] [--fps F] [--depth s] [--depth-rate r] [--input-at s] [--presence 0…1] \
     [--strength 0…1] [--appearance light|dark] [--seed n] [--background gray:<0…1>|<image>] \
-    [--size WxH] [--physical-mm WxH] [--location lat,lon] [--sky clear|natural|pass] [--param key=value]… \
+    [--size WxH] [--physical-mm WxH] [--location lat,lon] [--sky clear|natural|pass] [--strongest-wind] [--param key=value]… \
     [--windows single|overlap|panel|fullscreen|empty|<file.json>] [--window-age s] [--edr-headroom 1…16] [--debug-alpha] \
     [--output file.png|file.npy]
     --frames defaults to 1. Sequences default to 30 fps and write file-0000.png, file-0001.png, …
     --sky defaults to clear; pass is one cloud crossing the sun, starting at --time.
+    --strongest-wind holds the mean wind at its strongest and every gust at full strength.
     --edr-headroom lets the made-up display show above SDR white; a PNG clips that, so measure it from .npy output.
     --windows lays out made-up windows for effects that use them; --window-age (default 7200) is how long they have kept still.
     """)

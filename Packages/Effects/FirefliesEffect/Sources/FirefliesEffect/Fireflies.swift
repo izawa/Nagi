@@ -172,7 +172,7 @@ public final class Fireflies: Effect {
             // go or made anew until the next showing.
         } else if let world, world.seed == seed, world.displays == frame.displays.sorted(by: Self.order), world.count == count,
                   !dated || world.flying == flying, world.period == period, swarm != nil, elapsed >= 0, !seek {
-            swarm?.advance(to: frame.time, depth: depth, motion: motion)
+            swarm?.advance(to: frame.time, depth: depth, motion: motion, wind: frame.environment.wind)
         } else {
             world = (seed, frame.displays.sorted(by: Self.order), count, flying, period)
             swarm = Swarm(seed: seed, displays: frame.displays, count: flying, period: period, depth: depth,
@@ -200,7 +200,8 @@ public final class Fireflies: Effect {
         let shade = Self.bounded(frame.number("shade", default: 0.3), 0...0.6, default: 0.3)
         let orb = Self.bounded(frame.number("orb", default: 0.8), 0...1, default: 0.8)
         let orbSize = Self.bounded(frame.number("orbSize", default: 0.25), 0.1...1, default: 0.25)
-        let orbLag = Self.bounded(frame.number("orbLag", default: Self.orbLag), -0.4...0.4, default: Self.orbLag) * Self.motion(frame)
+        let orbLag = Self.bounded(frame.number("orbLag", default: Self.orbLag), -0.4...0.4, default: Self.orbLag)
+        let motion = Self.motion(frame)
         var instances: [Instance] = [], orbs: [Instance] = []
         // Leaving, each light keeps where and how bright it was at the last frame before the input,
         // and the core fades it (M7-PLAN 6).
@@ -221,9 +222,9 @@ public final class Fireflies: Effect {
             let point = firefly.position
             let x = (point.x - view.frameInDesktop.minX) * view.scale
             let y = (point.y - view.frameInDesktop.minY) * view.scale
-            // The inner orb trails by orbLag seconds of flight, so further when it flies fast; one
-            // still on the screen keeps its light drawn.
-            let lag = orb > 0 ? firefly.velocity(at: time) * orbLag * view.scale : .zero
+            // The inner orb trails by orbLag seconds of flight along the path it flies (the wind's
+            // drift too), so further when it flies fast; one still on the screen keeps its light drawn.
+            let lag = orb > 0 ? (firefly.velocity(at: time) * motion + firefly.carried) * orbLag * view.scale : .zero
             let margin = reach + (lag.x * lag.x + lag.y * lag.y).squareRoot()
             guard x > -margin, y > -margin, x < Double(view.pixelSize.x) + margin, y < Double(view.pixelSize.y) + margin
             else { continue }

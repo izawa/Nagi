@@ -1,4 +1,5 @@
 import Foundation
+import NagiKit
 import simd
 
 /// One firefly (M7-PLAN 3): it flies on whether lit or dark, so the next light comes on further
@@ -24,6 +25,9 @@ struct Firefly: Equatable {
     var flashes = 0
     var onset = -Double.infinity
     var lit = false
+    /// How the wind carried it over its last step, desktop points a second (the inner orb trails
+    /// the path it really flies).
+    var carried = SIMD2<Double>.zero
     /// Where its distance swings around, in `distance(at:)`'s units (−∞ far … +∞ near).
     var depth: Double
 
@@ -88,6 +92,27 @@ struct Firefly: Equatable {
         return 1 - 0.8 * Self.smooth((t - start) / 0.5) * (1 - Self.smooth((t - end + 0.5) / 0.5))
     }
 
+    /// Apparent drift on the screen at full wind, mm/s, for the nearest firefly: the mean wind at
+    /// its strongest and a gust at full strength, 2 mm/s together (M7-PLAN 4).
+    static let breezeDrift = 0.4
+    static let gustDrift = 1.6
+    /// The strongest mean wind the core makes, m/s (WindModel.maximumSpeed in NagiCore).
+    static let strongestWind = 3.5
+
+    /// How the shared wind carries it at `time`, desktop points a second: the mean wind along its
+    /// direction, and a gust where its front has reached along the front's travel. Nearer ones
+    /// drift more, in the ratio their flight speeds have. Reduce Motion halves the breeze and
+    /// stops the gusts (M7-PLAN 7).
+    func drift(in wind: Wind, at time: Double, reduceMotion: Bool) -> SIMD2<Double> {
+        let breeze = wind.velocity * (Self.breezeDrift / Self.strongestWind) * (reduceMotion ? 0.5 : 1)
+        let gust = reduceMotion ? .zero
+            : wind.frontDirection * Self.gustDrift * wind.gust(at: position / Swarm.pointsPerMillimetre)
+        let parallax = (Self.speeds.lowerBound + (Self.speeds.upperBound - Self.speeds.lowerBound) * nearness(at: time))
+            / Self.speeds.upperBound
+        let drift = (breeze + gust) * parallax * Swarm.pointsPerMillimetre
+        return drift.x.isFinite && drift.y.isFinite ? drift : .zero
+    }
+
     var point: CGPoint { CGPoint(x: position.x, y: position.y) }
 
     /// 0 … 1: how lit it is at `time`, by the seconds since its last flash began.
@@ -101,11 +126,12 @@ struct Firefly: Equatable {
         return level * (1 - Self.smooth((local - Self.rise - Self.hold) / Self.fall))
     }
 
-    /// Moves it by `step` seconds ending at `now`: along its course (times `motion`), and its
-    /// phase at `rate` cycles a second. A flash starts the moment the phase passes 1, if that
-    /// moment is within its life.
-    mutating func advance(step: Double, now: Double, rate: Double, motion: Double) {
-        position += velocity(at: now - step / 2) * step * motion
+    /// Moves it by `step` seconds ending at `now`: along its course (times `motion`) and with the
+    /// wind's `drift`, and its phase at `rate` cycles a second. A flash starts the moment the phase
+    /// passes 1, if that moment is within its life.
+    mutating func advance(step: Double, now: Double, rate: Double, motion: Double, drift: SIMD2<Double> = .zero) {
+        carried = drift
+        position += (velocity(at: now - step / 2) * motion + drift) * step
         phase += step * rate
         guard phase >= 1 else { return }
         phase -= 1
@@ -181,9 +207,9 @@ struct Swarm {
 
     /// Moves the fireflies on to `now`, fills the slots `depth` has reached, and replaces those
     /// that have flown their life or left the desktop (they fly on and away, not back: M7-PLAN 3).
-    /// `motion` scales the distance flown (Reduce Motion halves it, SPEC 2.2).
-    mutating func advance(to now: Double, depth: Double, motion: Double = 1) {
-        step(to: now, depth: depth, motion: motion)
+    /// `motion` scales the distance flown (Reduce Motion halves it, SPEC 2.2); `wind` carries them.
+    mutating func advance(to now: Double, depth: Double, motion: Double = 1, wind: Wind? = nil) {
+        step(to: now, depth: depth, motion: motion, wind: wind)
         let field = bounds.insetBy(dx: -Self.margin, dy: -Self.margin)
         for slot in fireflies.indices {
             if let firefly = fireflies[slot], firefly.isDone(at: now) || !field.contains(firefly.point) {
@@ -212,8 +238,9 @@ struct Swarm {
     }
 
     /// Moves every firefly to `now` in steps of at most 1/20 s: along its course, and its phase at
-    /// its own rate, pulled towards the flock's mean phase as hard as the depth allows.
-    private mutating func step(to now: Double, depth: Double, motion: Double) {
+    /// its own rate, pulled towards the flock's mean phase as hard as the depth allows. `wind` is
+    /// the one at `now`; each step reads its gusts at the step's own moment on the wind clock.
+    private mutating func step(to now: Double, depth: Double, motion: Double, wind: Wind?) {
         let pull = Self.coupling * Self.pull(depth: depth)
         var remaining = max(now - time, 0)
         while remaining > 0 {
@@ -226,7 +253,13 @@ struct Swarm {
                 // dθ/dt = ω + K · R · sin(ψ − θ), in cycles a second.
                 let angle = 2 * Double.pi * firefly.phase
                 let towards = mean.y * cos(angle) - mean.x * sin(angle)  // R · sin(ψ − θ)
-                firefly.advance(step: step, now: at, rate: 1 / firefly.period + pull * towards / (2 * .pi), motion: motion)
+                let drift = wind.map { now in
+                    var then = now
+                    then.time -= remaining + step / 2
+                    return firefly.drift(in: then, at: at - step / 2, reduceMotion: motion < 1)
+                } ?? .zero
+                firefly.advance(step: step, now: at, rate: 1 / firefly.period + pull * towards / (2 * .pi), motion: motion,
+                                drift: drift)
                 fireflies[slot] = firefly
             }
         }
