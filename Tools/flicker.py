@@ -166,6 +166,9 @@ def main():
     worst_flashes = float(flashes.max())
     print(f"most flashes in any second at one pixel: {worst_flashes:g} (limit {FLASHES_PER_SECOND})")
     print(f"fraction of pixels over the limit: {np.mean(flashes > FLASHES_PER_SECOND):.8f}")
+    # Two or more in a second at one pixel: with one moving light that flashes slowly, it takes
+    # two lights crossing or passing one after the other (M7-PLAN 10, C).
+    print(f"fraction of pixels with 2 or more: {np.mean(flashes >= 2):.8f}")
 
     worst = peaks.max()
     if args.step > 1:

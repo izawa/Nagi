@@ -135,10 +135,12 @@ public final class Fireflies: Effect {
     private var swarm: Swarm?
     /// What the swarm was made for: another showing, desktop or setting starts over.
     /// `flying` is `count` for the season the swarm was made in.
-    private var world: (seed: UInt64, displays: [CGRect], count: Int, flying: Int, period: Double, screen: Double)?
+    /// `drawn`: every display had been drawn, so their sizes were known.
+    private var world: (seed: UInt64, displays: [CGRect], count: Int, flying: Int, period: Double, screen: Double,
+                        drawn: Bool)?
     /// Each display's physical area, mm², by its rectangle, from `measured`: the latest view of
-    /// each display id (mirrored displays do not take turns), kept while it is drawn (displays draw
-    /// on their own schedules) and dropped a second after it stops (removed or replaced).
+    /// each display id, by when it was drawn (the Mac's uptime: a preview's clock may go back, and
+    /// an offline render's frames may be far apart in its own time).
     private var millimetres: [[Double]: Double] = [:]
     private var measured: [UInt32: (key: [Double], area: Double?, time: Double)] = [:]
     private var lastTime: Double?
@@ -164,38 +166,48 @@ public final class Fireflies: Effect {
         let period = Self.bounded(frame.number("period", default: 4), 3...5, default: 4)
         let seed = frame.seed &+ UInt64(frame.showing)
         let elapsed = lastTime.map { frame.time - $0 } ?? -1
-        // The season is read when the swarm is made, so midnight in a calm makes nothing anew. Only
-        // a date moved apart from the clock (the gallery's date, the Mac's clock set) into another
-        // number starts over.
-        // The first frame may not know a display's physical size yet; once render has seen it, the
-        // swarm is reweighed, or made anew if the number changes. Mirrored displays (one rectangle)
-        // take the largest size, whichever drew last.
-        measured = measured.filter { abs(frame.time - $0.value.time) <= 1 }
+        // The displays' physical sizes come from render, after the first update of a showing (a new
+        // showing forgets the last one's: a display may have been replaced meanwhile). A swarm made
+        // before every display was drawn is made once more if their sizes share the births out
+        // otherwise. Of the views of one rectangle (mirrored, or a display replaced), those drawn
+        // within a second of the latest count, the largest size first; views of a rectangle no longer
+        // on the desktop are dropped.
+        if world.map({ $0.seed != seed }) ?? true { measured = [:] }
+        let screens = Swarm.screens(frame.displays)
+        let keys = Set(screens.map(Swarm.key))
+        let latest = measured.values.reduce(into: [[Double]: Double]()) { $0[$1.key] = max($0[$1.key] ?? -.infinity, $1.time) }
+        measured = measured.filter { keys.contains($0.value.key) && $0.value.time >= latest[$0.value.key, default: 0] - 1 }
         millimetres = measured.values.reduce(into: [:]) { sizes, view in
             if let area = view.area { sizes[view.key] = max(sizes[view.key] ?? 0, area) }
         }
+        let drawn = keys.isSubset(of: Set(measured.values.map(\.key)))
         let screen = Swarm.share(frame.displays, millimetres: millimetres)
+        // The season is read when the swarm is made, so midnight in a calm makes nothing anew. Only
+        // a date moved apart from the clock (the gallery's date, the Mac's clock set) into another
+        // number starts over.
         let flying = Self.count(count, on: frame.date, screen: screen)
         let dated = lastDate.map { abs(frame.date.timeIntervalSince($0) - elapsed) > 60 } ?? false
         // A depth that jumps or goes back (a preview's slider), the clock set back, or a long stall:
         // start over, as rain does.
         let seek = abs(depth - lastDepth) > max(2 * elapsed, 2) + 1 || elapsed > 2
             || (depth < lastDepth - 0.5 && frame.phase != .leaving)
-        if Swarm.screens(frame.displays).isEmpty {
+        if screens.isEmpty {
             swarm = nil
         } else if frame.phase == .leaving, swarm != nil, world?.seed == seed {
             // Leaving, the lights hold still where they were (render): nothing moves, is born, let
             // go or made anew until the next showing.
-        } else if let world, world.seed == seed, world.displays == Swarm.screens(frame.displays), world.count == count,
+        } else if let world, world.seed == seed, world.displays == screens, world.count == count,
                   !dated || world.flying == flying, world.period == period, swarm != nil, elapsed >= 0, !seek,
+                  world.drawn || swarm?.isShaped(by: Swarm.shares(screens, millimetres: millimetres)) == true,
                   // A size that changes the number today starts over; one that does not keeps the lights.
                   Self.count(count, on: frame.date, screen: world.screen) == flying {
             swarm?.reweigh(millimetres: millimetres)
             self.world?.screen = screen
+            self.world?.drawn = world.drawn || drawn
             swarm?.advance(to: frame.time, depth: depth, motion: motion, wind: frame.environment.wind,
                            drift: Self.bounded(frame.number("drift", default: 1), 0...6, default: 1))
         } else {
-            world = (seed, Swarm.screens(frame.displays), count, flying, period, screen)
+            world = (seed, screens, count, flying, period, screen, drawn)
             swarm = Swarm(seed: seed, displays: frame.displays, millimetres: millimetres, count: flying, period: period, depth: depth,
                           now: frame.time)
         }
@@ -207,7 +219,8 @@ public final class Fireflies: Effect {
     public func render(_ frame: FrameState, view: DisplayView, encoder: any EffectEncoder) throws {
         // A display that no longer reports its size (another one in its place) falls back to points.
         let physical = view.physicalSize.map { $0.x * $0.y }
-        measured[view.id] = (Swarm.key(view.frameInDesktop), physical.flatMap { $0.isFinite && $0 > 0 ? $0 : nil }, frame.time)
+        measured[view.id] = (Swarm.key(view.frameInDesktop), physical.flatMap { $0.isFinite && $0 > 0 ? $0 : nil },
+                            ProcessInfo.processInfo.systemUptime)
         let visibility = Self.visibility(frame)
         guard visibility > 0, let swarm else { return }
         let pixelsPerMillimetre = 1 / view.millimetresPerPixel

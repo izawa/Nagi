@@ -178,6 +178,12 @@ struct FlightTests {
         var learnt = shallow
         learnt.reweigh(millimetres: [Swarm.key(half): Swarm.referenceMillimetres])
         #expect(learnt.screen == 1)
+        // The same swarm whatever the scale of its shares, while the pace is a 27-inch display's.
+        let one = Swarm(seed: 5, displays: [CGRect(x: 0, y: 0, width: 2560, height: 1440)], count: 3, period: 4, depth: 0, now: 0)
+        #expect(one.isShaped(by: [1.0005]) && !one.isShaped(by: [0.5]))
+        let two = Swarm(seed: 5, displays: [CGRect(x: 0, y: 0, width: 2560, height: 1440), CGRect(x: 2560, y: 0, width: 1280, height: 720)],
+                        count: 3, period: 4, depth: 0, now: 0)
+        #expect(two.isShaped(by: [2, 0.5]) && !two.isShaped(by: [1, 1]))
     }
 
     /// A firefly that has flown its life gives its slot to a new one after some dark.

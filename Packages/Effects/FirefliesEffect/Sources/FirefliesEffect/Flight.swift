@@ -174,7 +174,8 @@ struct Swarm {
     static let margin = 60.0
     /// The screen the set number is for: a 27-inch display (597 × 336 mm, M7-PLAN 6), and the same
     /// in points at `pointsPerMillimetre` (a 5K 27-inch's 2560 × 1440) for a display of unknown size.
-    static let referenceMillimetres = 597.0 * 336
+    /// (The height is the gallery preview's: 16:9 of 597 mm, a hair under 336.)
+    static let referenceMillimetres = 597.0 * 597 * 9 / 16
     static let referenceArea = 2560.0 * 1440
 
     /// A display's key: its rectangle.
@@ -276,6 +277,15 @@ struct Swarm {
     mutating func reweigh(millimetres: [[Double]: Double]) {
         let shares = Self.shares(displays, millimetres: millimetres)
         if shares.count == weights.count { weights = shares }
+    }
+
+    /// Whether `shares` would make the same swarm: births split alike over the displays, and the
+    /// slots paced alike (the pace stops at a 27-inch display's).
+    func isShaped(by shares: [Double]) -> Bool {
+        let total = shares.reduce(0, +), own = screen
+        guard shares.count == weights.count, total > 0, own > 0 else { return false }
+        return abs(min(total, 1) - min(own, 1)) < 1e-9
+            && zip(shares, weights).allSatisfy { abs($0 / total - $1 / own) < 1e-9 }
     }
 
     /// The flock's order, 0 (scattered) … 1 (in step): the length of the mean of their phases.
